@@ -1,0 +1,62 @@
+Evethan
+Copyright 2026 Quellovate
+
+This product includes software developed by Quellovate.
+
+=========================================================================
+1. PROPRIETARY GRAPHICAL ASSETS (ALL RIGHTS RESERVED)
+=========================================================================
+The project icons, logos, and related graphical assets (specifically 
+`logo.png` and `logo.svg` located in the `asset/` directory) are the 
+exclusive property and copyright of Quellovate.
+
+These graphical assets are strictly ALL RIGHTS RESERVED and are expressly 
+excluded from the Apache License 2.0 (or any other open-source license) 
+under which the rest of this project is distributed. You may not use, 
+reproduce, modify, or distribute these assets to endorse, promote, or 
+represent your own derived projects, commercial products, or services 
+without prior explicit written permission from Quellovate.
+
+=========================================================================
+2. THIRD-PARTY COMPONENTS
+=========================================================================
+This project incorporates or dynamically links to the following 
+third-party open-source libraries. Their respective licenses and 
+copyright notices are acknowledged below:
+
+* PySide6 (Qt for Python)
+  Copyright (C) The Qt Company Ltd. and other contributors.
+  License: GNU Lesser General Public License version 3 (LGPL v3)
+  Note: This project invokes PySide6 via Python's dynamic linking 
+  mechanism. Users are free to replace or modify the PySide6 library 
+  in accordance with the terms of the LGPL v3.
+
+* OpenCV-Python
+  Copyright (C) OpenCV project contributors.
+  License: Apache License 2.0 / MIT License
+
+* NumPy
+  Copyright (c) NumPy Developers.
+  License: BSD 3-Clause License
+
+* PyAutoGUI
+  Copyright (c) Al Sweigart.
+  License: BSD 3-Clause License
+
+* DXcam
+  Copyright (c) ra1nty.
+  License: MIT License
+
+* keyboard
+  Copyright (c) boppreh.
+  License: MIT License
+
+For the full license texts of the third-party dependencies mentioned 
+above, please refer to their respective official repositories or 
+installed package directories.
+
+=========================================================================
+3. ACKNOWLEDGEMENTS
+=========================================================================
+Portions of the source code and documentation within this project were 
+developed with the assistance of generative AI (Google Gemini).

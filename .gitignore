@@ -1,0 +1,8 @@
+env/
+.venv/
+__pycache__/
+.vscode/
+build/
+build.txt
+tasks/
+user_settings.json
