@@ -16,6 +16,7 @@ class TaskScheduler:
         # 指令类型 -> 执行函数的映射表
         self.function_map = {
             "mouse_move": self.executor.exec_mouse_move,
+            "camera_turn": self.executor.exec_camera_turn,
             "fixed_click": self.executor.exec_fixed_click,
             "offset_click": self.executor.exec_offset_click,
             "image_click": self.executor.exec_image_click,

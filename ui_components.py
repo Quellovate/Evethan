@@ -317,7 +317,7 @@ class ToolboxList(QListWidget):
             (
                 "鼠标操作",
                 [
-                    "mouse_move", "scroll",
+                    "mouse_move", "scroll", "camera_turn",
                     "fixed_click", "offset_click", "image_click",
                     "fixed_long_press", "offset_long_press", "image_long_press",
                     "mouse_drag", "image_drag",

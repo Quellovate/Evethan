@@ -145,6 +145,16 @@ class ScriptExecutor:
         self._emit(ExecutionEvent.RESULT, "移动完成", {"target": (tx, ty)})
         self._wait_after(wait_min, wait_max)
 
+    def exec_camera_turn(self, drag_dx, drag_dy, random_range=10, move_time_min=200, move_time_max=800, wait_min=50, wait_max=200):
+        """执行 3D 视角转动"""
+        final_dx, final_dy = Utils.get_gaussian_offset(drag_dx, drag_dy, random_range)
+        duration = Utils.get_random_time(move_time_min, move_time_max)
+        self._emit(ExecutionEvent.STEP_START, f"转动视角 (dx={final_dx}, dy={final_dy})")
+        self._emit(ExecutionEvent.DEBUG, f"相对移动，耗时 {duration:.2f}s")
+        self.action.mouse_move_relative(final_dx, final_dy, duration)
+        self._emit(ExecutionEvent.RESULT, "视角转动完成")
+        self._wait_after(wait_min, wait_max)
+
 
     # ==================== 点击操作 ====================
 

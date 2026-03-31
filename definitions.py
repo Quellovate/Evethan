@@ -40,6 +40,19 @@ FACTORY_CONFIG = {
             "wait_max": (int, 200),
         },
     },
+    "camera_turn": {
+        "label": "🔄 视角转动",
+        "desc": "用于 3D 游戏的视角旋转",
+        "params": {
+            "drag_dx": (int, 200),
+            "drag_dy": (int, 0),
+            "random_range": (int, 10),
+            "move_time_min": (int, 200),
+            "move_time_max": (int, 800),
+            "wait_min": (int, 50),
+            "wait_max": (int, 200),
+        },
+    },
     "scroll": {
         "label": "🖱️ 滚轮滚动",
         "desc": "滚动鼠标滚轮（正数向上, 负数向下）",

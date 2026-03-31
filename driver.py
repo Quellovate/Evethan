@@ -460,6 +460,42 @@ class ActionDriver:
         # 最后确保精确到达目标
         self._hardware_move_to_instant(tx, ty)
 
+    def mouse_move_relative(self, dx, dy, duration=0.5):
+        """发送用于 3D 游戏视角控制的相对鼠标位移"""
+        import ctypes
+        MOUSEEVENTF_MOVE = 0x0001
+
+        if duration <= 0.001:
+            if self.use_driver:
+                mx = max(-127, min(127, int(dx)))
+                my = max(-127, min(127, int(dy)))
+                self.lg_mouse.move_relative(mx, my)
+            else:
+                ctypes.windll.user32.mouse_event(MOUSEEVENTF_MOVE, int(dx), int(dy), 0, 0)
+            return
+
+        steps = int(max(20, duration * 120))
+        step_dx = dx / steps
+        step_dy = dy / steps
+
+        start_time = time.perf_counter()
+        for i in range(1, steps + 1):
+            # 计算每步应移动的真实增量，避免浮点数截断导致的误差累积
+            move_x = int(step_dx * i) - int(step_dx * (i - 1))
+            move_y = int(step_dy * i) - int(step_dy * (i - 1))
+
+            if self.use_driver:
+                mx = max(-127, min(127, move_x))
+                my = max(-127, min(127, move_y))
+                if mx != 0 or my != 0:
+                    self.lg_mouse.move_relative(mx, my)
+            else:
+                if move_x != 0 or move_y != 0:
+                    ctypes.windll.user32.mouse_event(MOUSEEVENTF_MOVE, move_x, move_y, 0, 0)
+
+            target_timestamp = start_time + (i / steps) * duration
+            Utils.precise_wait(target_timestamp)
+
     def mouse_click(self, x=None, y=None, button="left", repeat=1, duration=0.05, interval=0.1):
         """鼠标点击，可指定坐标、按钮、重复次数和按下时长"""
         if x is not None and y is not None:
