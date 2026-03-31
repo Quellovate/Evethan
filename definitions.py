@@ -5,7 +5,7 @@
 # 应用默认设置
 # ============================================================
 DEFAULT_APP_SETTINGS = {
-    "use_hardware": True,  # 是否使用硬件级输入
+    "use_hardware": False,  # 是否使用硬件级输入
     "detailed_log": False,  # 是否启用详细日志
     "osd_font_size": 24,  # OSD 字体大小
     "osd_center_x": 960,  # OSD 水平中心位置

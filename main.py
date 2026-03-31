@@ -885,6 +885,8 @@ class ExecuteWidget(QWidget):
         self.btn_stop.setEnabled(True)
         self.list_tasks.setEnabled(False)
         self.spin_run_times.setEnabled(False)
+        self.spin_timeout.setEnabled(False)
+        self.log_area.setFocus()
 
         t = threading.Thread(target=self._thread_runner, args=(processed_script, run_times, timeout_sec))
         t.daemon = True
@@ -940,6 +942,7 @@ class ExecuteWidget(QWidget):
             self.btn_stop.setEnabled(False)
             self.list_tasks.setEnabled(True)
             self.spin_run_times.setEnabled(True)
+            self.spin_timeout.setEnabled(True) 
             self.lbl_log_line1.setText("任务已结束")
             self.lbl_log_line2.setText("等待下一次运行...")
 
@@ -1222,6 +1225,14 @@ class MainWindow(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+
+    # 临时方案，屏蔽深色模式干扰
+    if hasattr(app.styleHints(), "setColorScheme"):
+        # PySide6 6.5 及以上版本
+        app.styleHints().setColorScheme(Qt.ColorScheme.Light)
+    else:
+        # 低版本 PySide6
+        app.setStyle("Fusion")
 
     # 确定基础目录
     if getattr(sys, "frozen", False):

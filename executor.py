@@ -155,6 +155,11 @@ class ScriptExecutor:
         self._emit(ExecutionEvent.RESULT, "视角转动完成")
         self._wait_after(wait_min, wait_max)
 
+        # 旋转完视角，立刻把 Windows 隐藏的虚拟光标拉回屏幕中心
+        w, h = Utils.get_screen_size()
+        import ctypes
+        ctypes.windll.user32.SetCursorPos(w // 2, h // 2)
+
 
     # ==================== 点击操作 ====================
 
