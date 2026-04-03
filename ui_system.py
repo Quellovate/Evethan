@@ -43,14 +43,16 @@ class FloatingOSD(QWidget):
     def __init__(self):
         super().__init__()
         # 置顶 + 无边框 + 工具窗口 + 鼠标穿透
-        self.setWindowFlags(
-            Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool | Qt.WindowTransparentForInput
-        )
+        self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool | Qt.WindowTransparentForInput)
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.is_visible_by_hotkey = False  # 是否被快捷键切换为可见
+        self.is_visible_by_hotkey = global_config.get_app_setting(
+            "osd_visible", False
+        )  # 从配置读取上次状态，找不到则默认不显示
         self.line1 = "等待任务启动..."
         self.line2 = ""
         self.reload_config()
+        if self.is_visible_by_hotkey:
+            self.show()
 
     def reload_config(self):
         """从全局配置重新读取字号和中心坐标，并刷新显示"""
@@ -69,6 +71,7 @@ class FloatingOSD(QWidget):
             self.show()
         else:
             self.hide()
+        global_config.set_app_setting("osd_visible", self.is_visible_by_hotkey)
 
     def update_text(self, title, detail, brief_line2, is_detail_only):
         """外部更新显示文本；若 is_detail_only 则忽略（OSD 只显示简要信息）"""
@@ -589,8 +592,8 @@ class DefaultSettingsWidget(QWidget):
         splitter.setSizes([300, 700])
         layout.addWidget(splitter, 1)
 
-        self.current_cmd_type = None   # 当前选中的指令类型
-        self.active_widgets = {}       # key → 对应的输入控件
+        self.current_cmd_type = None  # 当前选中的指令类型
+        self.active_widgets = {}  # key → 对应的输入控件
 
     # ---- 指令选择 ----
 
@@ -650,9 +653,7 @@ class DefaultSettingsWidget(QWidget):
                 btn_record = QPushButton("录制")
                 btn_record.setCursor(Qt.PointingHandCursor)
                 btn_record.setStyleSheet(UIStyles.BTN_ACTION_GREEN)
-                btn_record.clicked.connect(
-                    lambda _, w=widget, c=cmd_type, k=key: self.open_key_recorder(w, c, k)
-                )
+                btn_record.clicked.connect(lambda _, w=widget, c=cmd_type, k=key: self.open_key_recorder(w, c, k))
 
                 h_layout.addWidget(widget)
                 h_layout.addWidget(btn_record)
@@ -714,8 +715,7 @@ class DefaultSettingsWidget(QWidget):
         if not self.current_cmd_type:
             return
         reply = QMessageBox.question(
-            self, "确认重置", f"确定要恢复 [{self.current_cmd_type}] 的出厂设置吗？",
-            QMessageBox.Yes | QMessageBox.No,
+            self, "确认重置", f"确定要恢复 [{self.current_cmd_type}] 的出厂设置吗？", QMessageBox.Yes | QMessageBox.No
         )
         if reply == QMessageBox.Yes:
             global_config.reset_to_factory(self.current_cmd_type)

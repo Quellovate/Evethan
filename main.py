@@ -151,6 +151,8 @@ class SignalBridge(QObject):
     """线程安全的日志信号桥"""
 
     log_signal = Signal(str, str, str, bool)
+    # 用于界面状态和 OSD 更新
+    status_signal = Signal(str, str)
 
 
 # ========================================================================
@@ -556,6 +558,7 @@ class ExecuteWidget(QWidget):
         self._last_valid_loop_count = 1
         self.current_log_file_path = None  # 当前任务日志文件路径
         self.current_task_dir = None  # 当前任务文件夹路径
+        self.memory_task_name = global_config.get_app_setting("last_exec_task", None)  # 读取并记忆最后一次选中的任务名
         self._init_ui()
 
     # ----- UI 构建 -----
@@ -589,7 +592,7 @@ class ExecuteWidget(QWidget):
         self.readme_display = QTextEdit()
         self.readme_display.setReadOnly(True)
         self.readme_display.setStyleSheet(UIStyles.PANEL_READONLY_DISPLAY)
-        self.readme_display.setMaximumHeight(100)
+        self.readme_display.setMaximumHeight(200)
         d_layout.addWidget(self.readme_display)
         group_desc.setLayout(d_layout)
 
@@ -704,37 +707,53 @@ class ExecuteWidget(QWidget):
         log_layout.addWidget(self.log_area)
         group_log.setLayout(log_layout)
 
-        r_layout.addWidget(group_desc, 0)
+        r_layout.addWidget(group_desc, 1)
         r_layout.addWidget(group_ctrl, 0)
-        r_layout.addWidget(group_log, 1)
+        r_layout.addWidget(group_log, 2)
         right_panel.setLayout(r_layout)
 
         layout.addWidget(left_panel, 1)
         layout.addWidget(right_panel, 2)
 
-        self.refresh_list()
-        self.refresh_shortcut_hints()
+        # self.refresh_list()
+        # self.refresh_shortcut_hints()
 
     # ----- 列表 / 任务选择 -----
 
     def refresh_list(self):
         """刷新左侧任务列表（排除草稿任务）"""
+        self.list_tasks.blockSignals(True)
         self.list_tasks.clear()
         tasks = self.task_manager.get_all_tasks()
         if TaskManager.DRAFT_TASK_NAME in tasks:
             tasks.remove(TaskManager.DRAFT_TASK_NAME)
         self.list_tasks.addItems(tasks)
+        # 恢复之前的选中状态
+        if self.memory_task_name and self.memory_task_name in tasks:
+            items = self.list_tasks.findItems(self.memory_task_name, Qt.MatchExactly)
+            if items:
+                self.list_tasks.setCurrentItem(items[0])
+                self.on_task_selected(items[0], None)
+        else:
+            self.memory_task_name = None  # 任务可能被删除了，清除记忆
+        self.list_tasks.blockSignals(False)
 
     def on_task_selected(self, current, previous):
         """选中任务时加载说明和运行配置"""
         if not current:
-            self.readme_display.clear()
-            self.btn_clear_log.setEnabled(False)
-            self.btn_open_folder.setEnabled(False)
-            self.current_log_file_path = None
-            self.current_task_dir = None
             return
         task_name = current.text()
+        # 更新记忆并写入全局配置
+        self.memory_task_name = task_name
+        global_config.set_app_setting("last_exec_task", task_name)
+
+        # 更新界面标签和 OSD 悬浮窗
+        title = f"当前已选中任务: {task_name}"
+        subtitle = "状态: 尚未开始"
+        self.lbl_log_line1.setText(title)
+        self.lbl_log_line2.setText(subtitle)
+        self.signal_bridge.status_signal.emit(title, subtitle)
+
         info = self.task_manager.load_task_info(task_name)
         self.readme_display.setPlainText(info)
         task_dir = self.task_manager.get_task_path(task_name)
@@ -797,7 +816,10 @@ class ExecuteWidget(QWidget):
             self.lbl_log_line2.setText(brief_line2)
         if is_detail_mode:
             # 详细模式：所有消息都输出
-            log_text = f"[{timestamp}] {detail}"
+            if title and title != detail:
+                log_text = f"[{timestamp}] {title} >> {detail}"
+            else:
+                log_text = f"[{timestamp}] {detail}"
             self.log_area.append(log_text)
             self._append_to_file(log_text)
             sb = self.log_area.verticalScrollBar()
@@ -854,13 +876,19 @@ class ExecuteWidget(QWidget):
 
     def run_task(self):
         """开始执行所选任务（在子线程中运行调度器）"""
-        if not self.btn_run.isEnabled():
-            return
-        item = self.list_tasks.currentItem()
-        if not item:
+        # 不再依赖 UI 组件的选中状态，直接读取记忆变量
+        task_name = self.memory_task_name
+        if not task_name:
             self.log_area.append("[Warning] 请先在左侧选择一个任务")
             return
-        task_name = item.text()
+        # 二次校验任务是否还存在于硬盘上
+        tasks = self.task_manager.get_all_tasks()
+        if task_name not in tasks:
+            self.log_area.append(f"[Error] 任务 '{task_name}' 已不存在，请重新选择")
+            self.memory_task_name = None
+            self.refresh_list()
+            return
+
         script_data = self.task_manager.load_script(task_name)
         task_dir = self.task_manager.get_task_path(task_name)
         self.current_task_dir = task_dir
@@ -942,9 +970,15 @@ class ExecuteWidget(QWidget):
             self.btn_stop.setEnabled(False)
             self.list_tasks.setEnabled(True)
             self.spin_run_times.setEnabled(True)
-            self.spin_timeout.setEnabled(True) 
-            self.lbl_log_line1.setText("任务已结束")
-            self.lbl_log_line2.setText("等待下一次运行...")
+            self.spin_timeout.setEnabled(True)
+            # 读取记忆的任务名，更新 OSD 状态
+            task_name = getattr(self, "memory_task_name", "未知任务")
+            title = f"任务已结束: {task_name}"
+            subtitle = "状态: 等待下一次运行..."
+
+            self.lbl_log_line1.setText(title)
+            self.lbl_log_line2.setText(subtitle)
+            self.signal_bridge.status_signal.emit(title, subtitle)
 
     # ----- 辅助事件过滤 -----
 
@@ -1133,6 +1167,16 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.tabs)
         self.tabs.currentChanged.connect(self.on_tab_changed)
 
+        # 将执行日志同步到悬浮日志窗口
+        self.tab_execute.signal_bridge.log_signal.connect(self.floating_osd.update_text)
+        # 将状态信号连接到 OSD
+        self.tab_execute.signal_bridge.status_signal.connect(
+            lambda line1, line2: self.floating_osd.update_text(line1, "", line2, False)
+        )
+
+        self.tab_execute.refresh_list()
+        self.tab_execute.refresh_shortcut_hints()
+
         # 默认打开草稿任务
         self.tab_editor.open_task(TaskManager.DRAFT_TASK_NAME)
 
@@ -1142,9 +1186,6 @@ class MainWindow(QMainWindow):
         self.hotkey_handler.sig_run.connect(self.on_global_run)
         self.hotkey_handler.sig_stop.connect(self.on_global_stop)
         self.hotkey_handler.sig_toggle_osd.connect(self.floating_osd.toggle_visibility)
-
-        # 将执行日志同步到悬浮日志窗口
-        self.tab_execute.signal_bridge.log_signal.connect(self.floating_osd.update_text)
 
     # ----- 设置变更回调 -----
 

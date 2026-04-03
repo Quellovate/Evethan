@@ -9,8 +9,21 @@ import time
 import uuid
 from collections import deque
 
-from PySide6.QtCore import QKeyCombination, QMimeData, QPoint, QRect, QSize, Qt, Signal
-from PySide6.QtGui import QAction, QBrush, QColor, QDrag, QFont, QIcon, QKeySequence, QPen, QShortcut, QPixmap, QPainter
+from PySide6.QtCore import QKeyCombination, QMimeData, QPoint, QRect, QSize, Qt, Signal, QTimer
+from PySide6.QtGui import (
+    QAction,
+    QBrush,
+    QColor,
+    QCursor,
+    QDrag,
+    QFont,
+    QIcon,
+    QKeySequence,
+    QPen,
+    QShortcut,
+    QPixmap,
+    QPainter,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -88,7 +101,7 @@ class HistoryManager:
         self.timeline = timeline
         self.undo_stack = deque(maxlen=max_history)  # 撤销栈
         self.redo_stack = deque(maxlen=max_history)  # 重做栈
-        self.is_performing_undo_redo = False          # 防止在撤销/重做时再次记录快照
+        self.is_performing_undo_redo = False  # 防止在撤销/重做时再次记录快照
 
     def create_snapshot(self, action_name="未知操作"):
         """在执行操作前创建一份当前状态的深拷贝快照"""
@@ -317,10 +330,17 @@ class ToolboxList(QListWidget):
             (
                 "鼠标操作",
                 [
-                    "mouse_move", "scroll", "camera_turn",
-                    "fixed_click", "offset_click", "image_click",
-                    "fixed_long_press", "offset_long_press", "image_long_press",
-                    "mouse_drag", "image_drag",
+                    "mouse_move",
+                    "scroll",
+                    "camera_turn",
+                    "fixed_click",
+                    "offset_click",
+                    "image_click",
+                    "fixed_long_press",
+                    "offset_long_press",
+                    "image_long_press",
+                    "mouse_drag",
+                    "image_drag",
                 ],
             ),
             ("键盘操作", ["key_press", "key_long_press"]),
@@ -396,7 +416,7 @@ class ScriptTimeline(QListWidget):
     """任务编排列表：支持拖拽排序、勾选批量操作、折叠分组、撤销重做等"""
 
     structure_changed = Signal()  # 结构变化信号（缩进/行号等需要刷新时）
-    history_changed = Signal()   # 撤销/重做栈变化信号
+    history_changed = Signal()  # 撤销/重做栈变化信号
 
     def __init__(self, property_panel):
         super().__init__()
@@ -418,12 +438,18 @@ class ScriptTimeline(QListWidget):
         self.drop_indicator_row = -1
 
         # 鼠标交互状态机相关变量
-        self._interaction_mode = "none"        # 当前交互模式
-        self._drag_start_pos = None            # 拖拽起始位置
-        self._swipe_anchor_row = -1            # 滑动勾选的锚定行
-        self._initial_check_states = {}        # 滑动勾选开始前各行的勾选状态
-        self._swipe_target_value = None        # 滑动勾选的目标值
-        self._dragged_items = []               # 当前正在拖拽的项目列表
+        self._interaction_mode = "none"  # 当前交互模式
+        self._drag_start_pos = None  # 拖拽起始位置
+        self._swipe_anchor_row = -1  # 滑动勾选的锚定行
+        self._initial_check_states = {}  # 滑动勾选开始前各行的勾选状态
+        self._swipe_target_value = None  # 滑动勾选的目标值
+        self._dragged_items = []  # 当前正在拖拽的项目列表
+
+        # 自动滚动边缘检测与定时器
+        self._scroll_margin = 40  # 触发滚动的边缘判定距离（像素）
+        self._scroll_speed = 0  # 当前滚动速度
+        self._scroll_timer = QTimer(self)
+        self._scroll_timer.timeout.connect(self._handle_auto_scroll)
 
     # -------------------- 数据获取/辅助 --------------------
 
@@ -858,6 +884,24 @@ class ScriptTimeline(QListWidget):
     def dragMoveEvent(self, event):
         """拖拽移动：计算并更新放置指示线位置"""
         pos = event.position().toPoint()
+        viewport_height = self.viewport().height()
+        y = pos.y()
+
+        if y < self._scroll_margin:
+            # 靠近顶部边缘：向上滚动。速度随距离边缘越近越快（最少2像素/帧）
+            self._scroll_speed = -int(max(2, (self._scroll_margin - y) / 16))
+            if not self._scroll_timer.isActive():
+                self._scroll_timer.start(30)
+        elif y > viewport_height - self._scroll_margin:
+            # 靠近底部边缘：向下滚动
+            self._scroll_speed = int(max(2, (y - (viewport_height - self._scroll_margin)) / 16))
+            if not self._scroll_timer.isActive():
+                self._scroll_timer.start(30)
+        else:
+            # 鼠标在安全区中心，停止滚动
+            self._scroll_timer.stop()
+            self._scroll_speed = 0
+
         item = self.itemAt(pos)
         if item:
             rect = self.visualItemRect(item)
@@ -871,14 +915,37 @@ class ScriptTimeline(QListWidget):
         else:
             super().dragMoveEvent(event)
 
+    def _handle_auto_scroll(self):
+        """执行平滑滚动，并动态刷新放置指示线"""
+        if self._scroll_speed == 0:
+            return
+        vbar = self.verticalScrollBar()
+        old_val = vbar.value()
+        vbar.setValue(old_val + self._scroll_speed)
+        if vbar.value() == old_val:
+            return
+
+        # 重新抓取全局坐标，换算到组件内，刷新蓝色的放置指示线，否则指示线会停留在错误的行
+        pos = self.viewport().mapFromGlobal(QCursor.pos())
+        item = self.itemAt(pos)
+        if item:
+            rect = self.visualItemRect(item)
+            self.drop_indicator_row = self.row(item) if pos.y() < rect.center().y() else self.row(item) + 1
+        else:
+            self.drop_indicator_row = self.count() if self.count() > 0 else 0
+
+        self.viewport().update()
+
     def dragLeaveEvent(self, event):
         """拖拽离开：清除放置指示线"""
+        self._scroll_timer.stop()
         self.drop_indicator_row = -1
         self.viewport().update()
         super().dragLeaveEvent(event)
 
     def dropEvent(self, event):
         """拖拽放下：执行移动/添加操作，并验证结构合法性"""
+        self._scroll_timer.stop()
         # 记录来源行号（用于历史记录描述）
         source_rows = []
         if event.source() == self and self._dragged_items:
@@ -980,24 +1047,12 @@ class ScriptTimeline(QListWidget):
     def _validate_and_fix_structure(self, data_list):
         """验证指令列表的结构合法性（嵌套是否正确、分组是否闭合等）"""
         stack = []
-        in_group = False
         for item in data_list:
             t = item.get("type", "")
             params = item.get("params", {})
             link_id = params.get("link_id", "")
-            if t == "group_start":
-                if in_group:
-                    return False, "分组模块不可嵌套！"
-                if stack:
-                    return False, "分组模块只能放在最外层！"
-                in_group = True
-            elif t == "group_end":
-                if not in_group:
-                    return False, "存在孤立的分组结束标记！"
-                if stack:
-                    return False, "分组内的模块未闭合 (存在交叉嵌套)！"
-                in_group = False
-            elif "start" in t and link_id:
+
+            if "start" in t and link_id:
                 stack.append((t, link_id))
             elif "end" in t and link_id:
                 if not stack:
@@ -1018,8 +1073,6 @@ class ScriptTimeline(QListWidget):
                     params["link_id"] = parent_id  # 自动修正 link_id
         if stack:
             return False, "结构不完整：存在未闭合的开始标记！"
-        if in_group:
-            return False, "结构不完整：分组未闭合！"
         return True, "OK"
 
     # -------------------- 移动指令 --------------------
@@ -1177,9 +1230,9 @@ class PropertyEditor(QWidget):
     def __init__(self):
         super().__init__()
         self.setFocusPolicy(Qt.ClickFocus)
-        self.current_item = None       # 当前正在编辑的列表项
-        self.current_data = None       # 当前项的数据字典
-        self.task_root_path = None     # 任务根目录（截图保存用）
+        self.current_item = None  # 当前正在编辑的列表项
+        self.current_data = None  # 当前项的数据字典
+        self.task_root_path = None  # 任务根目录（截图保存用）
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(5, 5, 5, 5)
@@ -1192,8 +1245,8 @@ class PropertyEditor(QWidget):
         self.scroll_area.setWidget(self.form_widget)
         main_layout.addWidget(self.scroll_area)
 
-        self.active_widgets = {}       # 参数名 → 控件 的映射
-        self.history_callback = None   # 历史记录创建回调
+        self.active_widgets = {}  # 参数名 → 控件 的映射
+        self.history_callback = None  # 历史记录创建回调
         self.undo_callback = None
         self.redo_callback = None
 
@@ -1676,8 +1729,8 @@ class BatchEditWidget(QWidget):
         self.btn_apply.setStyleSheet(UIStyles.BTN_PRIMARY)
         self.layout.addWidget(self.btn_apply)
 
-        self.active_widgets = {}      # 参数名 → 输入控件
-        self.active_checkboxes = {}   # 参数名 → 是否启用勾选框
+        self.active_widgets = {}  # 参数名 → 输入控件
+        self.active_checkboxes = {}  # 参数名 → 是否启用勾选框
 
     def refresh_selection(self):
         """根据勾选的项目刷新批量编辑面板"""
