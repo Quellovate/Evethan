@@ -219,6 +219,8 @@ class TaskDelegate(QStyledItemDelegate):
             bg_color = UIColors.BG_GROUP_SEL if is_selected else UIColors.BG_GROUP
         elif "if_" in cmd_type or cmd_type == "else_branch":
             bg_color = UIColors.BG_IF_SEL if is_selected else UIColors.BG_IF
+        elif "hold_" in cmd_type:
+            bg_color = UIColors.BG_HOLD_SEL if is_selected else UIColors.BG_HOLD
         else:
             bg_color = UIColors.BG_NORMAL_SEL if is_selected else UIColors.BG_NORMAL
 
@@ -241,19 +243,17 @@ class TaskDelegate(QStyledItemDelegate):
                     if active_pair["start"] <= current_row <= active_pair["end"]:
                         if lvl == active_pair["indent"]:
                             is_active_highlight = True
-                
+
                 if is_active_highlight:
                     # 绘制淡红实线
                     painter.setPen(QPen(UIColors.GUIDE_LINE_SOLID, 2, Qt.SolidLine))
                 else:
                     # 绘制原有虚线
                     painter.setPen(QPen(UIColors.GUIDE_LINE, 1, Qt.DashLine))
-                    
+
                 painter.drawLine(line_x, rect.top(), line_x, rect.bottom())
 
         content_start_x = rect.left() + strip_w + (indent_level * UIDims.DELEGATE_INDENT_STEP) + 5
-
-
 
         # ---------- 分组起始行：绘制折叠按钮 + 标签 ----------
         if cmd_type == "group_start":
@@ -276,7 +276,7 @@ class TaskDelegate(QStyledItemDelegate):
             painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, f"{group_label}")
 
         # ---------- 按键类指令：绘制录制按钮和按键显示框 ----------
-        elif cmd_type in ["key_press", "key_long_press"]:
+        elif cmd_type in ["key_press", "key_long_press", "key_hold_start"]:
             text = index.data(Qt.DisplayRole)
             painter.setPen(UIColors.TEXT_NORMAL)
             title_rect = QRect(content_start_x, rect.top() + 4, rect.right() - content_start_x, 20)
@@ -307,7 +307,7 @@ class TaskDelegate(QStyledItemDelegate):
         else:
             text_x = content_start_x
             text = index.data(Qt.DisplayRole)
-            if any(x in cmd_type for x in ["loop_start", "if_start"]):
+            if any(x in cmd_type for x in ["loop_start", "if_start", "mouse_hold_start", "key_hold_start"]):
                 painter.setFont(UIFonts.delegate_bold(option.font))
             if cmd_type in ["break_loop", "stop_task"]:
                 painter.setPen(UIColors.TEXT_KEYWORD)
@@ -362,9 +362,10 @@ class ToolboxList(QListWidget):
                     "image_long_press",
                     "mouse_drag",
                     "image_drag",
+                    "mouse_hold_start",
                 ],
             ),
-            ("键盘操作", ["key_press", "key_long_press"]),
+            ("键盘操作", ["key_press", "key_long_press", "key_hold_start"]),
             ("流程控制", ["wait", "find_image", "break_loop", "stop_task"]),
             ("结构模块", ["loop_start", "if_start", "else_branch", "group_start", "separator"]),
         ]
@@ -518,7 +519,7 @@ class ScriptTimeline(QListWidget):
             t = data.get("type", "")
             current_indent = depth
             # 结束标记：先减深度
-            if t in ["loop_end", "group_end", "if_end"]:
+            if t in ["loop_end", "group_end", "if_end", "mouse_hold_end", "key_hold_end"]:
                 depth = max(0, depth - 1)
                 current_indent = depth
             elif t == "else_branch":
@@ -528,7 +529,7 @@ class ScriptTimeline(QListWidget):
                 data["_cache_indent"] = current_indent
                 item.setData(Qt.UserRole, data)
             # 开始标记：后增深度
-            if t in ["loop_start", "group_start", "if_start"]:
+            if t in ["loop_start", "group_start", "if_start", "mouse_hold_start", "key_hold_start"]:
                 depth += 1
 
     def refresh_line_numbers(self):
@@ -591,9 +592,9 @@ class ScriptTimeline(QListWidget):
         item = QListWidgetItem()
         t = data.get("type", "")
         height = UIDims.ITEM_H_NORMAL
-        if t in ["key_press", "key_long_press"]:
+        if t in ["key_press", "key_long_press", "key_hold_start"]:
             height = UIDims.ITEM_H_KEY
-        elif any(x in t for x in ["loop_", "group_", "if_"]):
+        elif any(x in t for x in ["loop_", "group_", "if_", "mouse_hold_", "key_hold_"]):
             height = UIDims.ITEM_H_STRUCTURE
         elif t == "separator":
             height = UIDims.ITEM_H_SEPARATOR
@@ -617,6 +618,10 @@ class ScriptTimeline(QListWidget):
             self.add_paired_module(insert_row_idx - 1, "group")
         elif cmd_type == "if_start" and data is None:
             self.add_paired_module(insert_row_idx - 1, "if")
+        elif cmd_type == "mouse_hold_start" and data is None:
+            self.add_paired_module(insert_row_idx - 1, "mouse_hold")
+        elif cmd_type == "key_hold_start" and data is None:
+            self.add_paired_module(insert_row_idx - 1, "key_hold")
         else:
             self._insert_cmd_at(insert_row_idx - 1, cmd_type, data)
 
@@ -719,7 +724,7 @@ class ScriptTimeline(QListWidget):
                 return
 
         # 点击按键录制按钮
-        if data.get("type") in ["key_press", "key_long_press"]:
+        if data.get("type") in ["key_press", "key_long_press", "key_hold_start"]:
             btn_y_start = rect.top() + UIDims.DELEGATE_INNER_MARGIN_TOP
             btn_x_start = content_start_x
             btn_w = UIDims.BTN_REC_WIDTH
@@ -1022,6 +1027,11 @@ class ScriptTimeline(QListWidget):
                 items_to_insert = self._create_paired_data("group")
             elif cmd_type == "if_start":
                 items_to_insert = self._create_paired_data("if")
+            elif cmd_type == "mouse_hold_start":
+                items_to_insert = self._create_paired_data("mouse_hold")
+            elif cmd_type == "key_hold_start":
+                items_to_insert = self._create_paired_data("key_hold")
+
             else:
                 items_to_insert = [self._create_single_data(cmd_type)]
         else:
@@ -1242,7 +1252,7 @@ class ScriptTimeline(QListWidget):
         data = item.data(Qt.UserRole)
         cmd_type = data.get("type", "")
         link_id = data.get("params", {}).get("link_id")
-        
+
         # 只有结构模块（含 link_id 且是 start/end）才触发
         if link_id and ("_start" in cmd_type or "_end" in cmd_type):
             start_idx, end_idx = -1, -1
@@ -1251,21 +1261,18 @@ class ScriptTimeline(QListWidget):
                 d = self.item(i).data(Qt.UserRole)
                 if d.get("params", {}).get("link_id") == link_id:
                     t = d.get("type", "")
-                    if "_start" in t: start_idx = i
-                    if "_end" in t: end_idx = i
-            
+                    if "_start" in t:
+                        start_idx = i
+                    if "_end" in t:
+                        end_idx = i
+
             if start_idx != -1 and end_idx != -1:
                 # 获取这对节点的缩进层级
                 target_indent = self.item(start_idx).data(Qt.UserRole).get("_cache_indent", 0) + 1
-                self.active_pair_info = {
-                    "start": start_idx,
-                    "end": end_idx,
-                    "indent": target_indent
-                }
+                self.active_pair_info = {"start": start_idx, "end": end_idx, "indent": target_indent}
         else:
             self.active_pair_info = None
         self.viewport().update()
-
 
 
 # ============================================================

@@ -591,3 +591,99 @@ class ActionDriver:
 
             if repeat > 1 and i < repeat - 1:
                 time.sleep(interval)
+
+    def mouse_down(self, button="left"):
+        """按下鼠标按键"""
+        if self.use_driver:
+            btn_code = lgdriver.MouseButton.LEFT
+            if button == "right":
+                btn_code = lgdriver.MouseButton.RIGHT
+            elif button == "middle":
+                btn_code = lgdriver.MouseButton.MIDDLE
+            self.lg_mouse.down(btn_code)
+        else:
+            pyautogui.mouseDown(button=button)
+
+    def mouse_up(self, button="left"):
+        """抬起鼠标按键"""
+        if self.use_driver:
+            self.lg_mouse.up()
+        else:
+            pyautogui.mouseUp(button=button)
+
+    def key_down(self, key_code):
+        """按下键盘按键（支持修饰键组合）"""
+        keys_to_press = Utils.normalize_key_code(key_code)
+        if not keys_to_press:
+            return
+
+        if not hasattr(self, "_held_keys"):
+            self._held_keys = set()
+
+        for k in keys_to_press:
+            self._held_keys.add(k)
+
+        self._sync_hardware_keyboard()
+
+        if not self.use_driver:
+            for k in keys_to_press:
+                try:
+                    pyautogui.keyDown(k)
+                except:
+                    pass
+
+    def key_up(self, key_code):
+        """抬起键盘按键"""
+        keys_to_release = Utils.normalize_key_code(key_code)
+        if not keys_to_release:
+            return
+
+        if not hasattr(self, "_held_keys"):
+            self._held_keys = set()
+
+        for k in keys_to_release:
+            if k in self._held_keys:
+                self._held_keys.remove(k)
+
+        self._sync_hardware_keyboard()
+
+        if not self.use_driver:
+            for k in keys_to_release:
+                try:
+                    pyautogui.keyUp(k)
+                except:
+                    pass
+
+    def _sync_hardware_keyboard(self):
+        """将当前的 _held_keys 状态同步到硬件驱动"""
+        if not self.use_driver:
+            return
+
+        if not hasattr(self, "_held_keys") or not self._held_keys:
+            self.lg_keyboard.release()
+            return
+
+        hid_codes, unsupported = Utils.map_key_names(list(self._held_keys), lgdriver.KEY_MAP)
+        if hid_codes:
+            self.lg_keyboard.press_keys(hid_codes)
+        elif not self._held_keys:
+            self.lg_keyboard.release()
+
+    def release_all_hardware_and_software_holds(self):
+        """强制释放所有处于物理/软件按下状态的操作"""
+        if self.use_driver:
+            self.lg_mouse.up()
+            self.lg_keyboard.release()
+
+        if hasattr(self, "_held_keys") and not self.use_driver:
+            for k in self._held_keys:
+                try:
+                    pyautogui.keyUp(k)
+                except:
+                    pass
+        if not self.use_driver:
+            for btn in ["left", "right", "middle"]:
+                pyautogui.mouseUp(button=btn)
+
+        if hasattr(self, "_held_keys"):
+            self._held_keys.clear()

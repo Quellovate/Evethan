@@ -58,16 +58,16 @@ class Semantic:
     GRAY_900 = Palette.GRAY_900
 
     # --- 通用背景 / 边框 / 文字 ---
-    BG_BASE = Palette.GRAY_300          # 页面底色
-    BG_SURFACE = Palette.WHITE          # 卡片 / 面板底色
-    BG_SURFACE_ALT = Palette.GRAY_100   # 次级面板底色
-    BG_HOVER = Palette.GRAY_200         # 悬停高亮
-    BORDER_DEFAULT = Palette.GRAY_300   # 默认边框
-    BORDER_HOVER = Palette.GRAY_500     # 悬停边框
-    TEXT_PRIMARY = Palette.GRAY_700     # 主要文字
-    TEXT_SECONDARY = Palette.GRAY_500   # 次要文字
-    TEXT_INVERSE = Palette.WHITE        # 反色文字（深色背景上）
-    TEXT_DISABLED = Palette.GRAY_500    # 禁用文字
+    BG_BASE = Palette.GRAY_300  # 页面底色
+    BG_SURFACE = Palette.WHITE  # 卡片 / 面板底色
+    BG_SURFACE_ALT = Palette.GRAY_100  # 次级面板底色
+    BG_HOVER = Palette.GRAY_200  # 悬停高亮
+    BORDER_DEFAULT = Palette.GRAY_300  # 默认边框
+    BORDER_HOVER = Palette.GRAY_500  # 悬停边框
+    TEXT_PRIMARY = Palette.GRAY_700  # 主要文字
+    TEXT_SECONDARY = Palette.GRAY_500  # 次要文字
+    TEXT_INVERSE = Palette.WHITE  # 反色文字（深色背景上）
+    TEXT_DISABLED = Palette.GRAY_500  # 禁用文字
 
     # --- 代码块 ---
     BG_CODE = Palette.GRAY_900
@@ -163,6 +163,8 @@ class UIColors:
     SEPARATOR_BG = QColor(Semantic.AUX_LIGHT_BG)
     SEPARATOR_TEXT = QColor(Semantic.AUX_LIGHT_TEXT)
     SEPARATOR_LINE = QColor(Semantic.AUX_LIGHT_BORDER)
+    BG_HOLD = QColor(Semantic.AUX_LIGHT_BG)
+    BG_HOLD_SEL = QColor(Semantic.AUX_LIGHT_BORDER)
 
     # --- 折叠按钮 ---
     FOLD_BTN_BORDER = QColor(Semantic.TEXT_SECONDARY)
@@ -225,8 +227,8 @@ class UIColors:
 # 字体工厂 —— 统一管理字体创建
 # ═══════════════════════════════════════════════════════════
 class UIFonts:
-    FAMILY_DEFAULT = "Microsoft YaHei"   # 默认字体
-    FAMILY_MONO = "Consolas"             # 等宽字体
+    FAMILY_DEFAULT = "Microsoft YaHei"  # 默认字体
+    FAMILY_MONO = "Consolas"  # 等宽字体
 
     # ---------- 应用全局默认字体 ----------
 
@@ -294,21 +296,21 @@ class UIFonts:
 # ═══════════════════════════════════════════════════════════
 class UIDims:
     # --- 行高 ---
-    ITEM_H_NORMAL = 50       # 普通步骤行高
-    ITEM_H_KEY = 60          # 按键步骤行高
-    ITEM_H_SEPARATOR = 60    # 分隔符行高
-    ITEM_H_STRUCTURE = 40    # 结构行（循环/分组头尾）行高
+    ITEM_H_NORMAL = 50  # 普通步骤行高
+    ITEM_H_KEY = 60  # 按键步骤行高
+    ITEM_H_SEPARATOR = 60  # 分隔符行高
+    ITEM_H_STRUCTURE = 40  # 结构行（循环/分组头尾）行高
 
     # --- 工具箱 ---
     TOOLBOX_HEADER_H = 44
     TOOLBOX_ITEM_H = 40
 
     # --- 委托绘制 ---
-    DELEGATE_STRIP_WIDTH = 60       # 左侧色带宽度
-    DELEGATE_CHECKBOX_SIZE = 22     # 复选框大小
+    DELEGATE_STRIP_WIDTH = 60  # 左侧色带宽度
+    DELEGATE_CHECKBOX_SIZE = 22  # 复选框大小
     DELEGATE_CHECKBOX_MARGIN_LEFT = 8
-    DELEGATE_FOLD_BTN_SIZE = 20     # 折叠按钮大小
-    DELEGATE_INDENT_STEP = 20       # 缩进步长
+    DELEGATE_FOLD_BTN_SIZE = 20  # 折叠按钮大小
+    DELEGATE_INDENT_STEP = 20  # 缩进步长
     DELEGATE_INNER_MARGIN_TOP = 32  # 内嵌框顶部偏移
 
     # --- 录制按钮 ---
@@ -357,8 +359,7 @@ class UIDims:
     def apply_page_layout(layout):
         """将统一的页面边距和间距应用到布局"""
         layout.setContentsMargins(
-            UIDims.PAGE_MARGIN_LEFT, UIDims.PAGE_MARGIN_TOP,
-            UIDims.PAGE_MARGIN_RIGHT, UIDims.PAGE_MARGIN_BOTTOM,
+            UIDims.PAGE_MARGIN_LEFT, UIDims.PAGE_MARGIN_TOP, UIDims.PAGE_MARGIN_RIGHT, UIDims.PAGE_MARGIN_BOTTOM
         )
         layout.setSpacing(UIDims.PAGE_SPACING)
 
@@ -565,16 +566,16 @@ class UIStyles:
 
     # ──────────── 文本标签样式 ────────────
 
-    LBL_EDITOR_TITLE = _text_factory(S.TEXT_PRIMARY, "20px", "bold")               # 编辑器标题
-    LBL_EDITOR_TITLE_DRAFT = _text_factory(S.WARNING_BG, "20px", "bold")           # 编辑器标题（草稿态）
-    RECORDER_TITLE = _text_factory(S.PRIMARY_PRESSED, "26px", "bold")              # 录制窗口标题
-    RECORDER_DISPLAY_ACTIVE = _text_factory(S.DANGER_BG, "26px", "bold")           # 录制中显示
-    LBL_EDITOR_MID_TITLE = _text_factory(S.TEXT_PRIMARY, "24px", "bold")           # 编辑器中间标题
-    LBL_CTRL_TITLE = _text_factory(S.TEXT_PRIMARY, "24px", "bold")                 # 控制区标题
-    LBL_SETTINGS_SECTION_TITLE = _text_factory(                                    # 设置页分区标题
+    LBL_EDITOR_TITLE = _text_factory(S.TEXT_PRIMARY, "20px", "bold")  # 编辑器标题
+    LBL_EDITOR_TITLE_DRAFT = _text_factory(S.WARNING_BG, "20px", "bold")  # 编辑器标题（草稿态）
+    RECORDER_TITLE = _text_factory(S.PRIMARY_PRESSED, "26px", "bold")  # 录制窗口标题
+    RECORDER_DISPLAY_ACTIVE = _text_factory(S.DANGER_BG, "26px", "bold")  # 录制中显示
+    LBL_EDITOR_MID_TITLE = _text_factory(S.TEXT_PRIMARY, "24px", "bold")  # 编辑器中间标题
+    LBL_CTRL_TITLE = _text_factory(S.TEXT_PRIMARY, "24px", "bold")  # 控制区标题
+    LBL_SETTINGS_SECTION_TITLE = _text_factory(  # 设置页分区标题
         S.PRIMARY_PRESSED, "20px", "bold", "margin-bottom: 12px;"
     )
-    LBL_SETTINGS_FIXED_TITLE = _text_factory(                                      # 设置页固定标题
+    LBL_SETTINGS_FIXED_TITLE = _text_factory(  # 设置页固定标题
         S.TEXT_PRIMARY, "20px", "bold", "margin-bottom: 12px;"
     )
     LBL_BRIEF_TITLE = _text_factory(S.PRIMARY_PRESSED, "20px", "bold", "border: none;")  # 简要信息标题
@@ -583,15 +584,18 @@ class UIStyles:
     # ──────────── 执行 / 停止按钮 ────────────
 
     _EXEC_BTN = "padding: 6px; font-weight: bold; border-radius: 8px; font-size: 28px;"
-    BTN_RUN = _btn_factory(S.SUCCESS_BG, S.SUCCESS_TEXT, S.SUCCESS_PRESSED, S.SUCCESS_HOVER, _EXEC_BTN)   # 运行
-    BTN_STOP = _btn_factory(S.DANGER_BG, S.DANGER_TEXT, S.DANGER_PRESSED, S.DANGER_HOVER, _EXEC_BTN)     # 停止
+    BTN_RUN = _btn_factory(S.SUCCESS_BG, S.SUCCESS_TEXT, S.SUCCESS_PRESSED, S.SUCCESS_HOVER, _EXEC_BTN)  # 运行
+    BTN_STOP = _btn_factory(S.DANGER_BG, S.DANGER_TEXT, S.DANGER_PRESSED, S.DANGER_HOVER, _EXEC_BTN)  # 停止
 
     # ──────────── 主操作按钮 ────────────
 
     _MAIN_BTN = "padding: 12px; font-weight: bold; border-radius: 6px; font-size: 15px;"
     BTN_PRIMARY = _btn_factory(S.PRIMARY_BG, S.PRIMARY_TEXT, S.PRIMARY_PRESSED, S.PRIMARY_HOVER, _MAIN_BTN)
     BTN_CREATE_TASK = _btn_factory(
-        S.PRIMARY_BG, S.PRIMARY_TEXT, S.PRIMARY_PRESSED, S.PRIMARY_HOVER,
+        S.PRIMARY_BG,
+        S.PRIMARY_TEXT,
+        S.PRIMARY_PRESSED,
+        S.PRIMARY_HOVER,
         "font-size: 15px; font-weight: bold; border-radius: 6px; padding: 10px;",
     )
 
@@ -610,22 +614,31 @@ class UIStyles:
 
     # 保存按钮（正常态 / 脏数据态）
     BTN_SAVE_NORMAL = _btn_factory(
-        S.BG_SURFACE_ALT, S.TEXT_SECONDARY, S.BORDER_DEFAULT, S.BG_HOVER,
+        S.BG_SURFACE_ALT,
+        S.TEXT_SECONDARY,
+        S.BORDER_DEFAULT,
+        S.BG_HOVER,
         "font-weight: bold; border-radius: 6px; padding: 8px 16px; font-size: 24px;",
     )
     BTN_SAVE_DIRTY = _btn_factory(
-        S.WARNING_BG, S.WARNING_TEXT, S.WARNING_PRESSED, S.WARNING_HOVER,
+        S.WARNING_BG,
+        S.WARNING_TEXT,
+        S.WARNING_PRESSED,
+        S.WARNING_HOVER,
         "font-weight: bold; border-radius: 6px; padding: 8px 16px; font-size: 24px;",
     )
 
     # 删除按钮
     BTN_DELETE_DANGER = (
         _btn_factory(
-            S.DANGER_LIGHT_BG, S.DANGER_LIGHT_TEXT, S.DANGER_LIGHT_BORDER, S.DANGER_HOVER,
+            S.DANGER_LIGHT_BG,
+            S.DANGER_LIGHT_TEXT,
+            S.DANGER_LIGHT_BORDER,
+            S.DANGER_HOVER,
             "font-weight: bold; border-radius: 6px; padding: 8px 16px; font-size: 24px;",
         )
         + f"QPushButton:disabled {{ background-color: {S.BG_SURFACE_ALT}; color: {S.TEXT_DISABLED}; "
-          f"border: 1px solid {S.BORDER_DEFAULT}; }}"
+        f"border: 1px solid {S.BORDER_DEFAULT}; }}"
     )
 
     # 彩色操作按钮组
@@ -641,46 +654,51 @@ class UIStyles:
     BTN_ACTION_ORANGE = _btn_factory(
         S.WARNING_LIGHT_BG, S.WARNING_LIGHT_TEXT, S.WARNING_LIGHT_BORDER, S.WARNING_HOVER, _BASE_BTN
     )
-    BTN_ACTION_PURPLE = _btn_factory(
-        S.AUX_LIGHT_BG, S.AUX_LIGHT_TEXT, S.AUX_LIGHT_BORDER, S.AUX_HOVER, _BASE_BTN
-    )
-    BTN_ACTION_DEEP_PURPLE = _btn_factory(
-        S.AUX_LIGHT_BG, S.AUX_PRESSED, S.AUX_LIGHT_BORDER, S.AUX_HOVER, _BASE_BTN
-    )
+    BTN_ACTION_PURPLE = _btn_factory(S.AUX_LIGHT_BG, S.AUX_LIGHT_TEXT, S.AUX_LIGHT_BORDER, S.AUX_HOVER, _BASE_BTN)
+    BTN_ACTION_DEEP_PURPLE = _btn_factory(S.AUX_LIGHT_BG, S.AUX_PRESSED, S.AUX_LIGHT_BORDER, S.AUX_HOVER, _BASE_BTN)
 
     # ──────────── 特殊用途按钮 ────────────
 
     # OSD 调整按钮
     BTN_OSD_ADJUST = _btn_factory(
-        S.SUCCESS_LIGHT_BG, S.SUCCESS_PRESSED, S.SUCCESS_BG, S.SUCCESS_HOVER,
-        "padding: 6px; font-size: 20px; font-weight: bold; border-radius: 6px; "
-        "margin-left: 20px; max-width: 220px;",
+        S.SUCCESS_LIGHT_BG,
+        S.SUCCESS_PRESSED,
+        S.SUCCESS_BG,
+        S.SUCCESS_HOVER,
+        "padding: 6px; font-size: 20px; font-weight: bold; border-radius: 6px; margin-left: 20px; max-width: 220px;",
     )
     # 重置按钮
     BTN_RESET_DANGER = _btn_factory(
-        "transparent", S.DANGER_BG, S.DANGER_BG, S.DANGER_LIGHT_BG,
-        "border-radius: 6px; padding: 8px; font-size: 14px;",
+        "transparent", S.DANGER_BG, S.DANGER_BG, S.DANGER_LIGHT_BG, "border-radius: 6px; padding: 8px; font-size: 14px;"
     )
     # 设置页录制按钮
     BTN_SETTINGS_RECORD = _btn_factory(
-        S.SUCCESS_LIGHT_BG, S.SUCCESS_PRESSED, S.SUCCESS_LIGHT_BORDER, S.SUCCESS_HOVER,
+        S.SUCCESS_LIGHT_BG,
+        S.SUCCESS_PRESSED,
+        S.SUCCESS_LIGHT_BORDER,
+        S.SUCCESS_HOVER,
         "border-radius: 4px; font-size: 20px; padding: 4px 16px;",
     )
     # 角落工具按钮
     BTN_CORNER_TOOL = _btn_factory(
-        S.PRIMARY_LIGHT_BG, S.PRIMARY_PRESSED, S.PRIMARY_LIGHT_BORDER, S.PRIMARY_HOVER,
+        S.PRIMARY_LIGHT_BG,
+        S.PRIMARY_PRESSED,
+        S.PRIMARY_LIGHT_BORDER,
+        S.PRIMARY_HOVER,
         "padding: 6px 18px; border-radius: 6px; font-weight: bold; font-size: 24px; "
         "margin-bottom: 4px; margin-top: 4px;",
     )
 
     # 全选 / 取消全选按钮
     BTN_SELECT_ALL = _btn_factory(
-        S.PRIMARY_LIGHT_BG, S.PRIMARY_PRESSED, S.PRIMARY_LIGHT_BORDER, S.PRIMARY_HOVER,
+        S.PRIMARY_LIGHT_BG,
+        S.PRIMARY_PRESSED,
+        S.PRIMARY_LIGHT_BORDER,
+        S.PRIMARY_HOVER,
         "border-radius: 4px; font-size: 13px;",
     )
     BTN_UNSELECT_ALL = _btn_factory(
-        S.BG_SURFACE_ALT, S.TEXT_SECONDARY, S.BORDER_DEFAULT, S.BG_HOVER,
-        "border-radius: 4px; font-size: 13px;",
+        S.BG_SURFACE_ALT, S.TEXT_SECONDARY, S.BORDER_DEFAULT, S.BG_HOVER, "border-radius: 4px; font-size: 13px;"
     )
 
     # ──────────── 输入框样式 ────────────
@@ -695,9 +713,7 @@ class UIStyles:
         S.BG_SURFACE, S.TEXT_PRIMARY, S.BORDER_DEFAULT, "font-size: 20px; padding: 2px 8px;"
     )
 
-    INPUT_MANAGE_NAME = (
-        f"font-size: 14px; padding: 8px; border: 1px solid {S.BORDER_DEFAULT}; border-radius: 6px;"
-    )
+    INPUT_MANAGE_NAME = f"font-size: 14px; padding: 8px; border: 1px solid {S.BORDER_DEFAULT}; border-radius: 6px;"
 
     # ──────────── 标签 / 提示文本样式 ────────────
 
@@ -745,7 +761,7 @@ class UIStyles:
     """
 
     # 各功能区 GroupBox 面板
-    PANEL_EXEC = _groupbox_factory(_EXEC_BG, _EXEC_BD, _EXEC_TT, inner_bg=S.BG_SURFACE_ALT)     # 执行区
+    PANEL_EXEC = _groupbox_factory(_EXEC_BG, _EXEC_BD, _EXEC_TT, inner_bg=S.BG_SURFACE_ALT)  # 执行区
     PANEL_MANAGE = _groupbox_factory(_MANAGE_BG, _MANAGE_BD, _MANAGE_TT, inner_bg=S.BG_SURFACE)  # 管理区
     PANEL_EDITOR = _groupbox_factory(_EDITOR_BG, _EDITOR_BD, _EDITOR_TT, inner_bg=S.BG_SURFACE)  # 编辑区
 
@@ -769,14 +785,14 @@ class UIStyles:
     """
 
     # 设置页各分区面板
-    PANEL_CONFIG = _groupbox_factory(_CONFIG_BG, _CONFIG_BD, _CONFIG_TT, inner_bg=S.BG_SURFACE)          # 配置区
-    PANEL_SETTINGS_LOG = _groupbox_factory(                                                               # 日志设置
+    PANEL_CONFIG = _groupbox_factory(_CONFIG_BG, _CONFIG_BD, _CONFIG_TT, inner_bg=S.BG_SURFACE)  # 配置区
+    PANEL_SETTINGS_LOG = _groupbox_factory(  # 日志设置
         S.WARNING_LIGHT_BG, S.WARNING_LIGHT_BORDER, S.WARNING_DARK_TEXT, inner_bg=S.BG_SURFACE
     )
-    PANEL_SETTINGS_HW = _groupbox_factory(                                                                # 硬件设置
+    PANEL_SETTINGS_HW = _groupbox_factory(  # 硬件设置
         S.SUCCESS_LIGHT_BG, S.SUCCESS_LIGHT_BORDER, S.SUCCESS_DARK_TEXT, inner_bg=S.BG_SURFACE
     )
-    PANEL_SETTINGS_KEY = _groupbox_factory(                                                               # 快捷键设置
+    PANEL_SETTINGS_KEY = _groupbox_factory(  # 快捷键设置
         S.PRIMARY_LIGHT_BG, S.PRIMARY_LIGHT_BORDER, S.PRIMARY_DARK_TEXT, inner_bg=S.BG_SURFACE
     )
 

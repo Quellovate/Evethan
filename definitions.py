@@ -7,8 +7,8 @@
 DEFAULT_APP_SETTINGS = {
     "use_hardware": False,  # 是否使用硬件级输入
     "detailed_log": False,  # 是否启用详细日志
-    "last_exec_task": "", # 上一次所选的任务名称
-    "osd_visible": False, # OSD 启用状态
+    "last_exec_task": "",  # 上一次所选的任务名称
+    "osd_visible": False,  # OSD 启用状态
     "osd_font_size": 24,  # OSD 字体大小
     "osd_center_x": 960,  # OSD 水平中心位置
     "osd_center_y": 100,  # OSD 垂直中心位置
@@ -252,6 +252,23 @@ FACTORY_CONFIG = {
             "wait_max": (int, 200),
         },
     },
+    # ---- 状态控制：按下与抬起 ----
+    "mouse_hold_start": {
+        "label": "🖱️ 鼠标按下 (开始)",
+        "desc": "按下鼠标按键并保持，直到遇到结束节点",
+        "params": {"button": (str, "left"), "link_id": (str, ""), "wait_min": (int, 50), "wait_max": (int, 200)},
+    },
+    "mouse_hold_end": {
+        "label": "🖱️ 鼠标抬起 (结束)",
+        "desc": "释放前面按住的鼠标按键",
+        "params": {"link_id": (str, "")},
+    },
+    "key_hold_start": {
+        "label": "⌨️ 键盘按下 (开始)",
+        "desc": "按下键盘按键并保持，支持修饰键",
+        "params": {"key_code": (str, "shift"), "link_id": (str, ""), "wait_min": (int, 50), "wait_max": (int, 200)},
+    },
+    "key_hold_end": {"label": "⌨️ 键盘抬起 (结束)", "desc": "释放前面按住的键盘按键", "params": {"link_id": (str, "")}},
     # ---- 等待 / 找图 ----
     "wait": {
         "label": "⏳ 延时等待",
@@ -433,4 +450,6 @@ DISPLAY_NAME_OVERRIDE = {
     "group_start": "📂 分组模块",
     "if_start": "🔀 识图判断模块 (If)",
     "else_branch": "🔀 否则 (Else)",
+    "mouse_hold_start": "🖱️ 鼠标按下&抬起",
+    "key_hold_start": "⌨️ 键盘按下&抬起",
 }

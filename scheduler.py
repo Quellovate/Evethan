@@ -40,6 +40,10 @@ class TaskScheduler:
             "if_end": self.executor.exec_if_end,
             "break_loop": self.executor.exec_break,
             "stop_task": self.executor.exec_stop_task,
+            "mouse_hold_start": self.executor.exec_mouse_hold_start,
+            "mouse_hold_end": self.executor.exec_mouse_hold_end,
+            "key_hold_start": self.executor.exec_key_hold_start,
+            "key_hold_end": self.executor.exec_key_hold_end,
         }
 
     # ──────────────────────────────────────────────
@@ -62,6 +66,8 @@ class TaskScheduler:
     def stop(self):
         """外部调用：发出停止指令"""
         self.is_running = False
+        if hasattr(self.executor, "cleanup_all_holds"):
+            self.executor.cleanup_all_holds()
         self._emit(ExecutionEvent.INFO, "收到停止指令，正在终止...")
 
     # ──────────────────────────────────────────────
@@ -142,8 +148,7 @@ class TaskScheduler:
             )
         else:
             self._emit(
-                ExecutionEvent.INFO,
-                f"脚本开始执行，共 {len(task_list)} 个步骤，计划执行 {run_times} 轮 (无超时限制)",
+                ExecutionEvent.INFO, f"脚本开始执行，共 {len(task_list)} 个步骤，计划执行 {run_times} 轮 (无超时限制)"
             )
         self.is_running = True
 
@@ -307,6 +312,7 @@ class TaskScheduler:
                             except Exception as e:
                                 self._emit(ExecutionEvent.ERROR, f"执行异常: {e}")
                                 import traceback
+
                                 traceback.print_exc()
                                 self.is_running = False
                                 break
@@ -326,8 +332,15 @@ class TaskScheduler:
         except Exception as e:
             self._emit(ExecutionEvent.ERROR, f"调度器发生严重错误: {e}")
             import traceback
+
             traceback.print_exc()
         finally:
             self.is_running = False
             self.loop_stack = []
+            # 无论任务是因为完成、报错还是手动中止，都强制复位所有硬件/软件级的按键残留
+            if hasattr(self.executor, "cleanup_all_holds"):
+                try:
+                    self.executor.cleanup_all_holds()
+                except Exception as cleanup_err:
+                    print(f"清理外设状态时发生异常: {cleanup_err}")
             self._emit(ExecutionEvent.INFO, "脚本运行结束")

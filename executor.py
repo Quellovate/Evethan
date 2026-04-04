@@ -29,6 +29,7 @@ class ScriptExecutor:
         # 根据配置决定是否使用硬件模拟输入
         use_hw_setting = global_config.get_app_setting("use_hardware", True)
         self.action = ActionDriver(use_hardware=use_hw_setting)
+        self._hold_links = {} # 跟踪 start 和 end 节点的配对状态
         self.check_stop_func = None       # 外部停止检查回调
         self.context_provider = None       # 上下文信息提供回调（如循环信息）
         self.current_step_desc = "初始化..."
@@ -544,3 +545,59 @@ class ScriptExecutor:
     def exec_separator(self, label="—— 分割线 ——"):
         """分割线标记，仅用于视觉分隔"""
         self._emit(ExecutionEvent.DEBUG, f"分割线: {label}")
+
+
+
+    # ==================== 状态保持与清理机制 ====================
+
+    def cleanup_all_holds(self):
+        """清理由于异常中断导致的按键残留"""
+        if self._hold_links or (hasattr(self.action, '_held_keys') and self.action._held_keys):
+            self._emit(ExecutionEvent.WARNING, "正在强制清理并复位残留的鼠标与键盘按下状态...")
+            self.action.release_all_hardware_and_software_holds()
+            self._hold_links.clear()
+
+    def exec_stop_task(self):
+        """覆盖原有的停止方法，注入清理逻辑"""
+        self.cleanup_all_holds()
+        self._emit(ExecutionEvent.RESULT, "任务停止")
+
+    # ==================== 同步执行 (按下/抬起) ====================
+
+    def exec_mouse_hold_start(self, button="left", link_id=None, wait_min=50, wait_max=200):
+        """开始按下鼠标"""
+        self._emit(ExecutionEvent.STEP_START, f"按下并保持鼠标 [{button}] 键")
+        self.action.mouse_down(button)
+        if link_id:
+            # 记录此时实际按下的按键
+            self._hold_links[link_id] = {"type": "mouse", "val": button}
+        self._wait_after(wait_min, wait_max)
+
+    def exec_mouse_hold_end(self, link_id=None, **kwargs):
+        """抬起鼠标"""
+        target_btn = "left"
+        if link_id and link_id in self._hold_links:
+            target_btn = self._hold_links[link_id].get("val", "left")
+            del self._hold_links[link_id] 
+            
+        self._emit(ExecutionEvent.RESULT, f"抬起鼠标 [{target_btn}] 键")
+        self.action.mouse_up(target_btn)
+
+    def exec_key_hold_start(self, key_code, link_id=None, wait_min=50, wait_max=200):
+        """开始按下键盘按键"""
+        self._emit(ExecutionEvent.STEP_START, f"按下并保持按键 [{key_code}]")
+        self.action.key_down(key_code)
+        if link_id:
+            self._hold_links[link_id] = {"type": "key", "val": key_code}
+        self._wait_after(wait_min, wait_max)
+
+    def exec_key_hold_end(self, link_id=None, **kwargs): 
+        """抬起键盘按键"""
+        target_key = "" 
+        if link_id and link_id in self._hold_links:
+            target_key = self._hold_links[link_id].get("val", "")
+            del self._hold_links[link_id]
+
+        if target_key:
+            self._emit(ExecutionEvent.RESULT, f"抬起按键 [{target_key}]")
+            self.action.key_up(target_key)
