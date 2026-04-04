@@ -5,20 +5,24 @@ import sys
 import os
 import ctypes
 import platform
+
+# Windows 下设置 DPI 感知，避免高分屏缩放导致坐标不准
+if platform.system() == "Windows":
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            ctypes.windll.user32.SetProcessDPIAware()
+os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
+os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
+
 from PySide6.QtWidgets import QWidget, QApplication, QVBoxLayout, QLabel
 from PySide6.QtCore import Qt, Signal, QPoint, QRect
 from PySide6.QtGui import QPainter, QPen, QColor, QFont, QPixmap, QCursor, QRegion, QKeySequence
 
 from ui_styles import UIColors, UIFonts, UIStyles, UIDims
-
-# Windows 下设置 DPI 感知，避免高分屏缩放导致坐标不准
-if platform.system() == "Windows":
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
-    except Exception:
-        ctypes.windll.user32.SetProcessDPIAware()
-os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
-os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
 
 
 class ScreenTool(QWidget):

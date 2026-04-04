@@ -15,6 +15,18 @@ try:
 except ImportError:
     print("未安装 keyboard 库，全局快捷键功能不可用，请运行: pip install keyboard")
 
+# Windows 下设置 DPI 感知，避免高分屏缩放导致坐标不准
+if platform.system() == "Windows":
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            ctypes.windll.user32.SetProcessDPIAware()
+os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
+os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
+
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -79,17 +91,6 @@ except ImportError as e:
     sys.exit(1)
 
 from ui_styles import UIStyles, UIColors, UIDims, UIFonts
-
-# Windows 下设置 DPI 感知，避免高分屏缩放导致坐标不准
-
-if platform.system() == "Windows":
-    try:
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
-    except Exception:
-        ctypes.windll.user32.SetProcessDPIAware()
-
-os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
-os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
 
 
 # ========================================================================

@@ -146,6 +146,7 @@ class UIColors:
     STRIP_LINE = QColor(Semantic.BORDER_DEFAULT)
     ITEM_BOTTOM_BORDER = QColor(Semantic.BORDER_DEFAULT)
     GUIDE_LINE = QColor(Semantic.BORDER_DEFAULT)
+    GUIDE_LINE_SOLID = QColor(Semantic.DANGER_HOVER)
 
     # --- 拖放指示线 ---
     DROP_LINE = QColor(Semantic.PRIMARY_BG)

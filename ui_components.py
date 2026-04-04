@@ -224,15 +224,36 @@ class TaskDelegate(QStyledItemDelegate):
 
         painter.fillRect(main_body_rect, bg_color)
 
-        # ---------- 绘制缩进引导线（虚线） ----------
+        # ---------- 绘制缩进引导线（虚线 & 实线） ----------
+
+        list_widget = option.widget
+        active_pair = getattr(list_widget, "active_pair_info", None)
+        current_row = index.row()
+
         if indent_level > 0:
-            painter.setPen(QPen(UIColors.GUIDE_LINE, 1, Qt.DashLine))
             step = UIDims.DELEGATE_INDENT_STEP
+            strip_w = UIDims.DELEGATE_STRIP_WIDTH
             for lvl in range(1, indent_level + 1):
                 line_x = rect.left() + strip_w + (lvl * step)
+                # 判断这条线是否属于激活的配对
+                is_active_highlight = False
+                if active_pair:
+                    if active_pair["start"] <= current_row <= active_pair["end"]:
+                        if lvl == active_pair["indent"]:
+                            is_active_highlight = True
+                
+                if is_active_highlight:
+                    # 绘制淡红实线
+                    painter.setPen(QPen(UIColors.GUIDE_LINE_SOLID, 2, Qt.SolidLine))
+                else:
+                    # 绘制原有虚线
+                    painter.setPen(QPen(UIColors.GUIDE_LINE, 1, Qt.DashLine))
+                    
                 painter.drawLine(line_x, rect.top(), line_x, rect.bottom())
 
         content_start_x = rect.left() + strip_w + (indent_level * UIDims.DELEGATE_INDENT_STEP) + 5
+
+
 
         # ---------- 分组起始行：绘制折叠按钮 + 标签 ----------
         if cmd_type == "group_start":
@@ -1217,6 +1238,34 @@ class ScriptTimeline(QListWidget):
         """点击列表项时，将其数据加载到右侧属性面板"""
         if item:
             self.property_panel.load_properties(item, item.data(Qt.UserRole))
+        # 查找配对节点
+        data = item.data(Qt.UserRole)
+        cmd_type = data.get("type", "")
+        link_id = data.get("params", {}).get("link_id")
+        
+        # 只有结构模块（含 link_id 且是 start/end）才触发
+        if link_id and ("_start" in cmd_type or "_end" in cmd_type):
+            start_idx, end_idx = -1, -1
+            # 查找这对 link_id 的起点和终点
+            for i in range(self.count()):
+                d = self.item(i).data(Qt.UserRole)
+                if d.get("params", {}).get("link_id") == link_id:
+                    t = d.get("type", "")
+                    if "_start" in t: start_idx = i
+                    if "_end" in t: end_idx = i
+            
+            if start_idx != -1 and end_idx != -1:
+                # 获取这对节点的缩进层级
+                target_indent = self.item(start_idx).data(Qt.UserRole).get("_cache_indent", 0) + 1
+                self.active_pair_info = {
+                    "start": start_idx,
+                    "end": end_idx,
+                    "indent": target_indent
+                }
+        else:
+            self.active_pair_info = None
+        self.viewport().update()
+
 
 
 # ============================================================

@@ -10,6 +10,7 @@ import time
 import cv2
 import numpy as np
 import pyautogui
+import platform
 
 from definitions import KEY_NAME_ALIAS, SHIFT_CHAR_MAP
 
@@ -19,16 +20,20 @@ class POINT(ctypes.Structure):
     _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
 
 
-# ── 设置进程 DPI 感知，避免坐标/截图缩放偏差 ──
-try:
-    ctypes.windll.shcore.SetProcessDpiAwareness(1)
-except Exception:
+# Windows 下设置 DPI 感知，避免高分屏缩放导致坐标不准
+if platform.system() == "Windows":
     try:
-        ctypes.windll.user32.SetProcessDPIAware()
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
     except Exception:
-        pass
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            ctypes.windll.user32.SetProcessDPIAware()
+os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
+os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
 
 _user32 = ctypes.windll.user32
+
 
 # ── 尝试加载 dxcam（高性能 DXGI 截图库） ──
 try:

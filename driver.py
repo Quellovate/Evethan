@@ -463,6 +463,7 @@ class ActionDriver:
     def mouse_move_relative(self, dx, dy, duration=0.5):
         """发送用于 3D 游戏视角控制的相对鼠标位移"""
         import ctypes
+
         MOUSEEVENTF_MOVE = 0x0001
 
         if duration <= 0.001:
@@ -509,9 +510,9 @@ class ActionDriver:
                 elif button == "middle":
                     btn_code = lgdriver.MouseButton.MIDDLE
 
-                self.lg_mouse.click(btn_code)
-                if duration > 0.08:
-                    time.sleep(duration - 0.08)
+                self.lg_mouse.down(btn_code)
+                time.sleep(duration)
+                self.lg_mouse.up()
             else:
                 pyautogui.mouseDown(button=button)
                 time.sleep(duration)
