@@ -177,7 +177,8 @@ class QuickReplaceWindow(QDialog):
 
         self.setWindowTitle(f"快捷替换图片 - {self.task_name}")
         self.resize(UIDims.WINDOW_REPLACE_W, UIDims.WINDOW_REPLACE_H)
-        self.setWindowModality(Qt.ApplicationModal)
+        self.setWindowModality(Qt.NonModal)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
 
         self._init_ui()
 
@@ -356,8 +357,8 @@ class QuickReplaceWindow(QDialog):
 
     def _refresh_list_ui(self):
         """重新渲染卡片列表，刷新状态"""
-        while self.list_layout.count() > 1:
-            item = self.list_layout.takeAt(0)
+        while self.list_layout.count() > 3:
+            item = self.list_layout.takeAt(2)
             if item.widget():
                 item.widget().deleteLater()
         # 重新插入卡片
