@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QDialog,
     QListWidget,
     QListWidgetItem,
     QLabel,
@@ -41,6 +42,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QSplitter,
     QSpinBox,
+    QScrollArea,
     QTabWidget,
     QInputDialog,
     QTextEdit,
@@ -49,7 +51,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
 )
 from PySide6.QtCore import Qt, Signal, QObject, QEvent, QRect, QPoint, QUrl
-from PySide6.QtGui import QCloseEvent, QFont, QKeySequence, QShortcut, QDesktopServices, QIcon
+from PySide6.QtGui import QCloseEvent, QFont, QKeySequence, QShortcut, QDesktopServices, QIcon, QPixmap
 
 # ---------- 导入项目内部模块 ----------
 
@@ -157,6 +159,214 @@ class SignalBridge(QObject):
 
 
 # ========================================================================
+#  快捷替换图片页面：显示待替换图片及其相关信息
+# ========================================================================
+class QuickReplaceWindow(QDialog):
+    def __init__(self, task_name, image_data_map, task_manager, parent_editor):
+        super().__init__(parent_editor)
+        self.task_name = task_name
+        self.image_data_map = image_data_map
+        self.task_manager = task_manager
+        self.parent_editor = parent_editor
+        self.task_path = self.task_manager.get_task_path(self.task_name)
+
+        # 获取当前系统真实分辨率
+        screen_geo = QApplication.primaryScreen().geometry()
+        self.current_screen_w = screen_geo.width()
+        self.current_screen_h = screen_geo.height()
+
+        self.setWindowTitle(f"快捷替换图片 - {self.task_name}")
+        self.resize(UIDims.WINDOW_REPLACE_W, UIDims.WINDOW_REPLACE_H)
+        self.setWindowModality(Qt.ApplicationModal)
+
+        self._init_ui()
+
+    def _init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(12, 12, 12, 12)
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.NoFrame)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.scroll_area.setStyleSheet(UIStyles.REPLACE_SCROLL_AREA)
+
+        self.list_container = QWidget()
+        self.list_layout = QVBoxLayout(self.list_container)
+        self.list_layout.setSpacing(10)
+        self.list_layout.setContentsMargins(0, 0, 8, 0)
+
+        # 提示框
+        warning_box = QFrame()
+        warning_box.setStyleSheet(UIStyles.REPLACE_WARNING_BOX)
+        warning_box.setMinimumHeight(UIDims.REPLACE_WARNING_MIN_H)
+        warning_layout = QVBoxLayout(warning_box)
+        warning_layout.setContentsMargins(10, 6, 10, 6)
+
+        lbl_warning = QLabel(
+            "注意：\n\n"
+            "本功能将且仅将：自动更新所选【任务文件夹】下的【图片文件】，以及 script.json 中的【分辨率】标签 ( env_w/env_h )。\n\n"
+            "若进行跨分辨率（如 1080P 到 2K ）迁移脚本，原指令中设置的【识别区域】和【 X/Y 轴偏移量】"
+            "由于分辨率环境不一样可能会失效，请在替换图片后，手动检查并修正这部分参数！"
+        )
+        lbl_warning.setStyleSheet(UIStyles.REPLACE_WARNING_TEXT)
+        lbl_warning.setWordWrap(True)
+        warning_layout.addWidget(lbl_warning)
+        self.list_layout.addWidget(warning_box)
+
+        # 状态摘要
+        lbl_summary = QLabel(
+            f"当前系统分辨率: {self.current_screen_w} x {self.current_screen_h}  (浅红色代表分辨率不匹配，建议重新截图)"
+        )
+        lbl_summary.setStyleSheet(UIStyles.REPLACE_SUMMARY_TEXT)
+        self.list_layout.addWidget(lbl_summary)
+
+        # 遍历数据字典，渲染卡片
+        for img_filename, info in self.image_data_map.items():
+            card = self._create_image_card(img_filename, info)
+            self.list_layout.addWidget(card)
+
+        self.list_layout.addStretch()
+        self.scroll_area.setWidget(self.list_container)
+        layout.addWidget(self.scroll_area)
+
+    def _create_image_card(self, img_filename, info):
+        """创建单张图片的信息卡片"""
+        card = QFrame()
+
+        env_w = info.get("env_w", 0)
+        env_h = info.get("env_h", 0)
+        ref_lines = info.get("ref_lines", [])
+        total_refs = info.get("total_refs", 0)
+
+        # 根据分辨率一致与否决定卡片背景色
+        is_matched = env_w == self.current_screen_w and env_h == self.current_screen_h
+        card.setStyleSheet(UIStyles.REPLACE_CARD_MATCHED if is_matched else UIStyles.REPLACE_CARD_UNMATCHED)
+
+        card.setMinimumHeight(UIDims.REPLACE_CARD_MIN_H)
+        card_layout = QHBoxLayout(card)
+        card_layout.setContentsMargins(12, 12, 12, 12)
+
+        # 左侧：图片缩略图
+        lbl_thumb = QLabel()
+        lbl_thumb.setFixedSize(UIDims.REPLACE_THUMB_SIZE, UIDims.REPLACE_THUMB_SIZE)
+        lbl_thumb.setStyleSheet(UIStyles.REPLACE_THUMBNAIL)
+        lbl_thumb.setAlignment(Qt.AlignCenter)
+
+        img_path = os.path.join(self.task_path, img_filename)
+        if os.path.exists(img_path):
+            pixmap = QPixmap(img_path)
+            lbl_thumb.setPixmap(
+                pixmap.scaled(
+                    UIDims.REPLACE_THUMB_SIZE - 4,
+                    UIDims.REPLACE_THUMB_SIZE - 4,
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation,
+                )
+            )
+            thumb_inner = UIDims.REPLACE_THUMB_SIZE - 2
+            lbl_thumb.setPixmap(pixmap.scaled(thumb_inner, thumb_inner, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        else:
+            lbl_thumb.setText("图片丢失")
+            lbl_thumb.setStyleSheet(UIStyles.REPLACE_THUMBNAIL_ERROR)
+
+        card_layout.addWidget(lbl_thumb)
+
+        # 中间：图片信息
+        info_layout = QVBoxLayout()
+        info_layout.setContentsMargins(24, 0, 0, 0)
+        lbl_name = QLabel(f"文件名: {img_filename}")
+        lbl_name.setStyleSheet(UIStyles.REPLACE_LBL_NAME)
+        lbl_res = QLabel(f"原图分辨率: {env_w} x {env_h}")
+        lbl_res.setStyleSheet(UIStyles.REPLACE_LBL_RES)
+
+        display_lines = ", ".join(map(str, ref_lines[:10]))
+        if len(ref_lines) > 10:
+            display_lines += " 等"
+        lbl_refs = QLabel(f"被 {total_refs} 个指令引用：第 {display_lines} 行")
+        lbl_refs.setStyleSheet(UIStyles.REPLACE_LBL_REFS)
+        lbl_refs.setWordWrap(True)
+
+        info_layout.addWidget(lbl_name)
+        info_layout.addWidget(lbl_res)
+        info_layout.addWidget(lbl_refs)
+        info_layout.addStretch()
+
+        card_layout.addLayout(info_layout)
+        card_layout.addStretch()
+
+        # 右侧：快捷截图按钮
+        btn_reshot = QPushButton("快捷截图")
+        btn_reshot.setCursor(Qt.PointingHandCursor)
+        btn_reshot.setStyleSheet(UIStyles.BTN_REPLACE_ACTION)
+        btn_reshot.setFixedSize(UIDims.REPLACE_BTN_W, UIDims.REPLACE_BTN_H)
+        btn_reshot.clicked.connect(lambda checked, fname=img_filename: self.start_quick_shot(fname))
+        card_layout.addWidget(btn_reshot)
+        return card
+
+    def start_quick_shot(self, img_filename):
+        """隐藏窗口 -> 开启截图 -> 处理结果 -> 恢复显示"""
+        # 1. 静默隐藏当前弹窗，避免遮挡截图视线
+        self.hide()
+
+        # 2. 实例化并配置截图工具
+        self.tool_window = ScreenTool(mode="screenshot")
+
+        # 信号 A：成功完成框选截图
+        self.tool_window.screenshot_created.connect(lambda pixmap: self._handle_capture_success(pixmap, img_filename))
+
+        # 信号 B：工具窗口关闭
+        self.tool_window.setAttribute(Qt.WA_DeleteOnClose)  # 关闭时释放内存
+        self.tool_window.destroyed.connect(lambda: self.show())
+        self.tool_window.show()
+
+    def _handle_capture_success(self, pixmap, img_filename):
+        """截图完成后的数据覆写工作"""
+        full_path = os.path.join(self.task_path, img_filename)
+
+        try:
+            # 物理覆盖所选任务文件夹的旧图片文件
+            pixmap.save(full_path, "PNG")
+            print(f"文件已覆盖: {full_path}")
+
+            # 覆写 script.json 分辨率数据
+            script_data = self.task_manager.load_script(self.task_name)
+            update_count = 0
+
+            for step in script_data:
+                params = step.get("params", {})
+                # 检查此条指令是否引用了当前正在替换的图片
+                if params.get("image_path") == img_filename:
+                    params["env_w"] = self.current_screen_w
+                    params["env_h"] = self.current_screen_h
+                    update_count += 1
+
+            self.task_manager.save_script(self.task_name, script_data)
+            print(f"JSON 数据已同步更新，共修改 {update_count} 处指令的分辨率记录。")
+            # 更新本地内存中的 image_data_map，实时刷新窗口状态，同步任务编辑器信息
+            if img_filename in self.image_data_map:
+                self.image_data_map[img_filename]["env_w"] = self.current_screen_w
+                self.image_data_map[img_filename]["env_h"] = self.current_screen_h
+            self._refresh_list_ui()
+            self.parent_editor.open_task(self.task_name)
+
+        except Exception as e:
+            QMessageBox.critical(self, "替换失败", f"在处理文件时发生错误:\n{str(e)}")
+
+    def _refresh_list_ui(self):
+        """重新渲染卡片列表，刷新状态"""
+        while self.list_layout.count() > 1:
+            item = self.list_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        # 重新插入卡片
+        for img_filename, info in self.image_data_map.items():
+            card = self._create_image_card(img_filename, info)
+            self.list_layout.insertWidget(self.list_layout.count() - 1, card)
+
+
+# ========================================================================
 #  任务编辑器页面：工具箱 + 任务编排编排 + 属性面板 + 说明 + 批量编辑
 # ========================================================================
 
@@ -192,6 +402,12 @@ class TaskEditorWidget(QWidget):
         v_layout.addWidget(self.lbl_undo)
         v_layout.addWidget(self.lbl_redo)
 
+        # 快捷替换已引用图片按钮
+        self.btn_quick_replace = QPushButton("快捷替换已引用图片")
+        self.btn_quick_replace.clicked.connect(self.open_quick_replace_window)
+        self.btn_quick_replace.setEnabled(False)
+        self.btn_quick_replace.setStyleSheet(UIStyles.BTN_QUICK_REPLACE)
+
         # 删除未引用图片按钮
         self.btn_clean_imgs = QPushButton("删除未引用图片")
         self.btn_clean_imgs.clicked.connect(self.clean_unreferenced_images)
@@ -208,6 +424,7 @@ class TaskEditorWidget(QWidget):
         top_bar.addSpacing(30)
         top_bar.addWidget(history_widget)
         top_bar.addStretch()
+        top_bar.addWidget(self.btn_quick_replace)
         top_bar.addWidget(self.btn_clean_imgs)
         top_bar.addWidget(self.btn_save)
         layout.addLayout(top_bar)
@@ -356,6 +573,7 @@ class TaskEditorWidget(QWidget):
         if not self.is_dirty:
             self.is_dirty = True
             self.btn_clean_imgs.setEnabled(False)
+            self.btn_quick_replace.setEnabled(False)
             if self.current_task_name == TaskManager.DRAFT_TASK_NAME:
                 self.btn_save.setText("另存为新任务")
             else:
@@ -367,8 +585,10 @@ class TaskEditorWidget(QWidget):
         self.is_dirty = False
         if self.current_task_name and self.current_task_name != TaskManager.DRAFT_TASK_NAME:
             self.btn_clean_imgs.setEnabled(True)
+            self.btn_quick_replace.setEnabled(True)
         else:
             self.btn_clean_imgs.setEnabled(False)
+            self.btn_quick_replace.setEnabled(False)
         if self.current_task_name == TaskManager.DRAFT_TASK_NAME:
             self.btn_save.setText("另存为新任务")
         else:
@@ -497,8 +717,43 @@ class TaskEditorWidget(QWidget):
         else:
             QMessageBox.critical(self, "失败", "保存失败，请检查文件权限。")
 
-    # ----- 清理未引用图片 -----
+    def _extract_image_references(self):
+        """遍历当前脚本，提取所有引用的图片信息"""
+        # 加载最新保存的脚本数据
+        script_data = self.task_manager.load_script(self.current_task_name)
+        image_dict = {}
+        for index, step in enumerate(script_data):
+            params = step.get("params", {})
+            image_path = params.get("image_path")
+            # 如果该指令包含 image_path 参数且不为空
+            if image_path:
+                line_num = index + 1
+                env_w = params.get("env_w", 0)
+                env_h = params.get("env_h", 0)
+                # 如果是第一次遇到这张图，初始化字典
+                # 如果在多处引用时 env_w/h 不一致，默认保留第一次遇到的分辨率（理论上应该是一致的）
+                if image_path not in image_dict:
+                    image_dict[image_path] = {"env_w": env_w, "env_h": env_h, "ref_lines": [], "total_refs": 0}
+                # 追加引用信息
+                image_dict[image_path]["ref_lines"].append(line_num)
+                image_dict[image_path]["total_refs"] += 1
+        return image_dict
 
+    # ----- 快捷替换图片 -----
+    def open_quick_replace_window(self):
+        """打开快捷替换图片的独立窗口"""
+        if self.is_dirty or not self.current_task_name or self.current_task_name == TaskManager.DRAFT_TASK_NAME:
+            return
+        image_data_map = self._extract_image_references()
+
+        if not image_data_map:
+            QMessageBox.information(self, "提示", "当前脚本中没有任何需要识图的指令，无需替换。")
+            return
+
+        self.quick_replace_window = QuickReplaceWindow(self.current_task_name, image_data_map, self.task_manager, self)
+        self.quick_replace_window.show()
+
+    # ----- 清理未引用图片 -----
     def clean_unreferenced_images(self):
         """扫描任务文件夹，找出未被脚本引用的图片并提供删除选项"""
         if self.is_dirty or not self.current_task_name or self.current_task_name == TaskManager.DRAFT_TASK_NAME:
@@ -601,8 +856,8 @@ class ExecuteWidget(QWidget):
         group_ctrl = QGroupBox("运行控制")
         group_ctrl.setStyleSheet(UIStyles.PANEL_EXEC)
         c_layout = QGridLayout()
-        c_layout.setHorizontalSpacing(30)
-        c_layout.setVerticalSpacing(10)
+        c_layout.setHorizontalSpacing(12)
+        c_layout.setVerticalSpacing(12)
 
         lbl_loop_setting = QLabel("重复执行次数:")
         lbl_loop_setting.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -657,6 +912,15 @@ class ExecuteWidget(QWidget):
         c_layout.addWidget(self.btn_stop, 1, 2)
         c_layout.addWidget(self.lbl_stop_hint, 1, 3)
         c_layout.setColumnStretch(4, 1)
+
+        self.lbl_video_hint = QLabel(
+            '请参考 <a href="https://www.bilibili.com/video/BV1nAX8B7Eyt/?t=116" style="color: #3B82F6; text-decoration: none;">'
+            "教程</a> 中关于上方设置的说明"
+        )
+        self.lbl_video_hint.setOpenExternalLinks(True)
+        self.lbl_video_hint.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.lbl_video_hint.setStyleSheet(f"font-size: 20px; color: {UIStyles.S.TEXT_SECONDARY};")
+        c_layout.addWidget(self.lbl_video_hint, 2, 0, 1, 4)
         group_ctrl.setLayout(c_layout)
 
         # 日志区域（摘要栏 + 详细日志框）

@@ -355,6 +355,19 @@ class UIDims:
     PAGE_MARGIN_BOTTOM = 8
     PAGE_SPACING = 8
 
+    # --- 快捷替换窗口相关尺寸 ---
+    WINDOW_REPLACE_W = 720
+    WINDOW_REPLACE_H = 650
+    REPLACE_WARNING_MIN_H = 150
+    REPLACE_CARD_MIN_H = 150
+    REPLACE_THUMB_SIZE = 150
+    REPLACE_BTN_W = 120
+    REPLACE_BTN_H = 40
+
+    # --- 执行页微调 ---
+    SPINBOX_CTRL_W = 160
+    BTN_RUN_STOP_W = 280
+
     @staticmethod
     def apply_page_layout(layout):
         """将统一的页面边距和间距应用到布局"""
@@ -641,6 +654,19 @@ class UIStyles:
         f"border: 1px solid {S.BORDER_DEFAULT}; }}"
     )
 
+    # 快捷替换按钮
+    BTN_QUICK_REPLACE = (
+        _btn_factory(
+            S.PRIMARY_LIGHT_BG,
+            S.PRIMARY_LIGHT_TEXT,
+            S.PRIMARY_LIGHT_BORDER,
+            S.PRIMARY_HOVER,
+            "font-weight: bold; border-radius: 6px; padding: 8px 16px; font-size: 24px;",
+        )
+        + f"QPushButton:disabled {{ background-color: {S.BG_SURFACE_ALT}; color: {S.TEXT_DISABLED}; "
+        f"border: 1px solid {S.BORDER_DEFAULT}; }}"
+    )
+
     # 彩色操作按钮组
     BTN_ACTION_BLUE = _btn_factory(
         S.PRIMARY_LIGHT_BG, S.PRIMARY_LIGHT_TEXT, S.PRIMARY_LIGHT_BORDER, S.PRIMARY_HOVER, _BASE_BTN
@@ -798,3 +824,78 @@ class UIStyles:
 
     # 垂直分割线颜色
     SEPARATOR_VLINE = f"color: {S.BORDER_DEFAULT};"
+
+    # ──────────── 快捷替换窗口专属样式 ────────────
+
+    # 顶部提示框
+    REPLACE_WARNING_BOX = f"""
+        QFrame {{ 
+            background-color: {S.PRIMARY_LIGHT_BG}; 
+            border: 1.5px solid {S.PRIMARY_LIGHT_BORDER}; 
+            border-radius: 8px; 
+        }}
+        QLabel {{ border: none; background: transparent; }} 
+    """
+    REPLACE_WARNING_TEXT = f"color: {S.PRIMARY_DARK_TEXT}; font-size: 16px; font-weight: bold;"
+
+    # 状态摘要文本
+    REPLACE_SUMMARY_TEXT = (
+        f"font-size: 18px; font-weight: bold; color: {S.TEXT_PRIMARY}; margin-top: 10px; margin-bottom: 5px;"
+    )
+
+    # 图片卡片
+    REPLACE_CARD_MATCHED = f"""
+        QFrame {{ 
+            background-color: {S.SUCCESS_LIGHT_BG}; 
+            border: 1px solid {S.SUCCESS_LIGHT_BORDER}; 
+            border-radius: 8px; 
+        }}
+    """
+    REPLACE_CARD_UNMATCHED = f"""
+        QFrame {{ 
+            background-color: {S.DANGER_LIGHT_BG}; 
+            border: 1px solid {S.DANGER_LIGHT_BORDER}; 
+            border-radius: 8px; 
+        }}
+    """
+
+    # 图片缩略图容器
+    REPLACE_THUMBNAIL = f"""
+        QLabel {{
+            background-color: transparent; 
+            border: none;
+        }}
+    """
+
+    # 缩略图丢失错误文本 
+    REPLACE_THUMBNAIL_ERROR = f"color: {S.DANGER_BG}; font-weight: bold; background-color: transparent;"
+
+    # 卡片内部信息文本
+    REPLACE_LBL_NAME = f"border: none; font-size: 16px; font-weight: bold; color: {S.TEXT_PRIMARY}; background: transparent;"
+    REPLACE_LBL_RES = f"border: none; font-size: 16px; color: {S.TEXT_PRIMARY}; background: transparent;"
+    REPLACE_LBL_REFS = f"border: none; font-size: 16px; color: {S.TEXT_PRIMARY}; background: transparent;"
+
+    # 独立滚动条
+    REPLACE_SCROLL_AREA = f"""
+        QScrollBar:vertical {{ 
+            border: none; 
+            background: transparent; 
+            width: 12px; 
+            margin: 0px; 
+        }}
+        QScrollBar::handle:vertical {{ 
+            background: {S.BORDER_HOVER}; 
+            min-height: 30px; 
+            border-radius: 6px; 
+            margin: 2px;
+        }}
+        QScrollBar::handle:vertical:hover {{ 
+            background: {S.TEXT_SECONDARY}; 
+        }}
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
+        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
+    """
+    BTN_REPLACE_ACTION = _btn_factory(
+        S.WARNING_LIGHT_BG, S.WARNING_LIGHT_TEXT, S.WARNING_LIGHT_BORDER, S.WARNING_HOVER, 
+        "padding: 2px 12px; border-radius: 6px; font-size: 18px; font-weight: bold;"
+    )
