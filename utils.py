@@ -247,7 +247,7 @@ class Utils:
     def precise_wait(target_time):
         """等待直到 time.perf_counter() 达到 target_time（高精度忙等）"""
         while time.perf_counter() < target_time:
-            pass
+            time.sleep(0)
 
     # ================================================================
     #  按键名称解析 / 映射

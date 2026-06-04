@@ -257,6 +257,20 @@ class TaskManager:
         except Exception as e:
             return False, str(e)
 
+    def delete_task(self, task_name):
+        """删除指定任务及其所有文件"""
+        if task_name == self.DRAFT_TASK_NAME:
+            return False, "草稿任务不可删除"
+        path = os.path.join(self.tasks_dir, task_name)
+        if not os.path.exists(path):
+            return False, "该任务不存在"
+        try:
+            import shutil
+            shutil.rmtree(path)
+            return True, "成功"
+        except Exception as e:
+            return False, str(e)
+
     # 草稿任务
     def ensure_draft_task(self):
         """确保草稿任务存在，不存在则创建"""

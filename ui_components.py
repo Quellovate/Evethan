@@ -213,16 +213,27 @@ class TaskDelegate(QStyledItemDelegate):
 
         # ---------- 根据指令类型和选中状态决定背景色 ----------
         is_selected = option.state & QStyle.State_Selected
+
+        # 同步高亮同一模块的配对节点
+        list_widget = option.widget
+        active_pair = getattr(list_widget, "active_pair_info", None)
+        current_row = index.row()
+        is_active_pair = False
+        if active_pair and current_row in (active_pair["start"], active_pair["end"]):
+            is_active_pair = True
+        is_highlight = is_selected or is_active_pair
+
+        
         if "loop_" in cmd_type:
-            bg_color = UIColors.BG_LOOP_SEL if is_selected else UIColors.BG_LOOP
+            bg_color = UIColors.BG_LOOP_SEL if is_highlight else UIColors.BG_LOOP
         elif "group_" in cmd_type:
-            bg_color = UIColors.BG_GROUP_SEL if is_selected else UIColors.BG_GROUP
+            bg_color = UIColors.BG_GROUP_SEL if is_highlight else UIColors.BG_GROUP
         elif "if_" in cmd_type or cmd_type == "else_branch":
-            bg_color = UIColors.BG_IF_SEL if is_selected else UIColors.BG_IF
+            bg_color = UIColors.BG_IF_SEL if is_highlight else UIColors.BG_IF
         elif "hold_" in cmd_type:
-            bg_color = UIColors.BG_HOLD_SEL if is_selected else UIColors.BG_HOLD
+            bg_color = UIColors.BG_HOLD_SEL if is_highlight else UIColors.BG_HOLD
         else:
-            bg_color = UIColors.BG_NORMAL_SEL if is_selected else UIColors.BG_NORMAL
+            bg_color = UIColors.BG_NORMAL_SEL if is_highlight else UIColors.BG_NORMAL
 
         painter.fillRect(main_body_rect, bg_color)
 
@@ -374,7 +385,7 @@ class ToolboxList(QListWidget):
     def populate_tools(self):
         """根据分类和全局配置，填充工具箱列表项"""
         full_config = global_config.get_config()
-        # 各分类对应的项目背景色
+        # 各分类对应的指令背景色
         bg_color_map = {
             "鼠标操作": UIColors.TOOLBOX_ITEM_MOUSE,
             "键盘操作": UIColors.TOOLBOX_ITEM_KEYBOARD,
@@ -465,7 +476,7 @@ class ScriptTimeline(QListWidget):
         self._swipe_anchor_row = -1  # 滑动勾选的锚定行
         self._initial_check_states = {}  # 滑动勾选开始前各行的勾选状态
         self._swipe_target_value = None  # 滑动勾选的目标值
-        self._dragged_items = []  # 当前正在拖拽的项目列表
+        self._dragged_items = []  # 当前正在拖拽的指令列表
 
         # 自动滚动边缘检测与定时器
         self._scroll_margin = 40  # 触发滚动的边缘判定距离（像素）
@@ -476,15 +487,15 @@ class ScriptTimeline(QListWidget):
     # -------------------- 数据获取/辅助 --------------------
 
     def get_all_data_deep_copy(self):
-        """获取所有项目数据的深拷贝（用于撤销/重做快照）"""
+        """获取所有指令数据的深拷贝（用于撤销/重做快照）"""
         return copy.deepcopy([self.item(i).data(Qt.UserRole) for i in range(self.count())])
 
     def get_all_data(self):
-        """获取所有项目数据的引用列表"""
+        """获取所有指令数据的引用列表"""
         return [self.item(i).data(Qt.UserRole) for i in range(self.count())]
 
     def _get_item_desc(self, item):
-        """获取项目的描述文本（用于日志/提示）"""
+        """获取指令的描述文本（用于日志/提示）"""
         if not item:
             return "未知指令"
         data = item.data(Qt.UserRole)
@@ -498,7 +509,7 @@ class ScriptTimeline(QListWidget):
         return item.data(Qt.UserRole).get("_cache_indent", 0)
 
     def _has_checked_items(self):
-        """检查是否有任何项目被勾选"""
+        """检查是否有任何指令被勾选"""
         return any(self.item(i).data(Qt.UserRole).get("checked", False) for i in range(self.count()))
 
     # -------------------- UI刷新 --------------------
@@ -578,7 +589,6 @@ class ScriptTimeline(QListWidget):
             self.addItem(item)
         self._apply_fold_states()
         self.refresh_ui()
-        QApplication.processEvents()
         self.verticalScrollBar().setValue(scroll_val)
         self.setUpdatesEnabled(True)
 
@@ -803,14 +813,40 @@ class ScriptTimeline(QListWidget):
     # -------------------- 勾选相关 --------------------
 
     def _toggle_check_state(self, item):
-        """切换单个项目的勾选状态"""
+        """切换单个指令的勾选状态，同时勾选模块的开始和结束时，将同步勾选其包围的所有指令"""
         data = item.data(Qt.UserRole)
-        data["checked"] = not data.get("checked", False)
+        new_state = not data.get("checked", False)
+        data["checked"] = new_state
         item.setData(Qt.UserRole, data)
+        cmd_type = data.get("type", "")
+        link_id = data.get("params", {}).get("link_id")
+
+        if link_id and ("_start" in cmd_type or "_end" in cmd_type):
+            start_row, end_row = -1, -1
+            # 找出此 link_id 对应的起点和终点行号
+            for i in range(self.count()):
+                d = self.item(i).data(Qt.UserRole)
+                if d.get("params", {}).get("link_id") == link_id:
+                    if "_start" in d.get("type", ""):
+                        start_row = i
+                    if "_end" in d.get("type", ""):
+                        end_row = i
+            # 同步包围区间内所有指令状态
+            if start_row != -1 and end_row != -1:
+                start_checked = self.item(start_row).data(Qt.UserRole).get("checked", False)
+                end_checked = self.item(end_row).data(Qt.UserRole).get("checked", False)
+                if start_checked == end_checked:
+                    for i in range(start_row + 1, end_row):
+                        target_item = self.item(i)
+                        d = target_item.data(Qt.UserRole)
+                        if d.get("checked", False) != start_checked:
+                            d["checked"] = start_checked
+                            target_item.setData(Qt.UserRole, d)
+
         self.viewport().update()
 
     def _update_swipe_range(self, current_row):
-        """滑动勾选：将锚定行到当前行之间的项目设为目标勾选值"""
+        """滑动勾选：将锚定行到当前行之间的指令设为目标勾选值"""
         if self._swipe_anchor_row == -1 or self._swipe_target_value is None:
             return
         start = min(self._swipe_anchor_row, current_row)
@@ -844,11 +880,14 @@ class ScriptTimeline(QListWidget):
     # -------------------- 分组折叠 --------------------
 
     def toggle_group_fold(self, item):
-        """切换分组的折叠/展开状态"""
+        """切换分组的折叠/展开状态，并记录快照"""
         data = item.data(Qt.UserRole)
         if data.get("type") != "group_start":
             return
         is_collapsed = not data["params"].get("collapsed", False)
+        action_name = "折叠分组" if is_collapsed else "展开分组"
+        self.history_mgr.create_snapshot(action_name)
+
         data["params"]["collapsed"] = is_collapsed
         item.setData(Qt.UserRole, data)
         link_id = data["params"]["link_id"]
@@ -864,6 +903,8 @@ class ScriptTimeline(QListWidget):
             for i in range(start_row + 1, end_row):
                 self.item(i).setHidden(is_collapsed)
         self.viewport().update()
+        if hasattr(self, "property_panel") and self.property_panel:
+            self.property_panel.data_changed.emit()
 
     # -------------------- 拖拽（内部排序 & 外部添加） --------------------
 
@@ -1051,6 +1092,8 @@ class ScriptTimeline(QListWidget):
         event.accept()
         self.refresh_with_data(simulated_list)
         self._dragged_items = []
+        self.active_pair_info = None
+        self.viewport().update()
 
     # -------------------- 数据创建辅助 --------------------
 
@@ -1789,7 +1832,7 @@ class BatchEditWidget(QWidget):
         self.active_checkboxes = {}  # 参数名 → 是否启用勾选框
 
     def refresh_selection(self):
-        """根据勾选的项目刷新批量编辑面板"""
+        """根据勾选的指令刷新批量编辑面板"""
         self.target_items = [
             self.timeline.item(i)
             for i in range(self.timeline.count())

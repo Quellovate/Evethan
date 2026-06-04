@@ -38,6 +38,7 @@ class ScriptExecutor:
     def set_stop_check(self, func):
         """设置停止检查函数"""
         self.check_stop_func = func
+        self.action.set_stop_check(func)
 
     def set_event_listener(self, callback):
         """设置事件监听器"""
@@ -78,6 +79,29 @@ class ScriptExecutor:
             self._emit(ExecutionEvent.DEBUG, f"操作后随机等待: {wait_time:.3f}s")
         if wait_time > 0:
             time.sleep(wait_time)
+
+    def _countdown_wait(self, final_time, action_desc="操作"):
+        """长按操作的剩余时间计时"""
+        if final_time > 1.0:
+            start_time = time.time()
+            last_reported_sec = -1
+            while True:
+                if self._is_stopped():
+                    self._emit(ExecutionEvent.WARNING, f"{action_desc}被中止")
+                    return False
+                elapsed = time.time() - start_time
+                remaining = final_time - elapsed
+                if remaining <= 0:
+                    break
+                current_rem_sec = int(remaining)
+                if current_rem_sec != last_reported_sec and current_rem_sec > 0:
+                    self._emit(ExecutionEvent.RESULT, f"还需{action_desc} {current_rem_sec} 秒")
+                    last_reported_sec = current_rem_sec
+                time.sleep(min(0.1, remaining))
+        else:
+            if final_time > 0:
+                time.sleep(final_time)
+        return True
 
     def _smart_move(self, tx, ty, enable_move=True, min_ms=200, max_ms=800):
         """智能移动鼠标：启用拟人移动时走贝塞尔曲线，关闭时走直线，耗时由参数控制"""
@@ -208,10 +232,13 @@ class ScriptExecutor:
         wait_max=200,
     ):
         """在当前鼠标位置的偏移处点击"""
-        self._emit(ExecutionEvent.STEP_START, f"偏移点击 ({off_x},{off_y})")
-        tx, ty = self.target.get_relative_coordinate(off_x, off_y, random_range)
-        self._emit(ExecutionEvent.DEBUG, f"坐标计算: 当前位置+偏移 -> 目标({tx},{ty})")
-        self._smart_move(tx, ty, move_enable, move_time_min, move_time_max)
+        if off_x == 0 and off_y == 0:
+            self._emit(ExecutionEvent.DEBUG, "原地点击")
+        else:
+            tx, ty = self.target.get_relative_coordinate(off_x, off_y, random_range)
+            self._emit(ExecutionEvent.DEBUG, f"坐标计算: 当前位置+偏移 -> 目标({tx},{ty})")
+            self._smart_move(tx, ty, move_enable, move_time_min, move_time_max)
+
         interval = Utils.get_random_time(interval_min, interval_max)
         click_duration = Utils.get_random_time(50, 120)
         self.action.mouse_click(
@@ -281,7 +308,16 @@ class ScriptExecutor:
         tx, ty = self.target.get_fixed_coordinate(x, y, random_range)
         self._smart_move(tx, ty, move_enable, move_time_min, move_time_max)
         interval = Utils.get_random_time(interval_min, interval_max)
-        self.action.mouse_click(x=None, y=None, button=button, repeat=repeat, duration=duration_s, interval=interval)
+
+        for i in range(repeat):
+            if self._is_stopped(): break
+            self.action.mouse_down(button)
+            completed = self._countdown_wait(duration_s, "长按")
+            self.action.mouse_up(button)
+            if not completed or self._is_stopped(): break
+            if repeat > 1 and i < repeat - 1:
+                time.sleep(interval)
+
         self._emit(ExecutionEvent.RESULT, "长按完成")
         self._wait_after(wait_min, wait_max)
 
@@ -306,7 +342,16 @@ class ScriptExecutor:
         tx, ty = self.target.get_relative_coordinate(off_x, off_y, random_range)
         self._smart_move(tx, ty, move_enable, move_time_min, move_time_max)
         interval = Utils.get_random_time(interval_min, interval_max)
-        self.action.mouse_click(x=None, y=None, button=button, repeat=repeat, duration=duration_s, interval=interval)
+
+        for i in range(repeat):
+            if self._is_stopped(): break
+            self.action.mouse_down(button)
+            completed = self._countdown_wait(duration_s, "长按")
+            self.action.mouse_up(button)
+            if not completed or self._is_stopped(): break
+            if repeat > 1 and i < repeat - 1:
+                time.sleep(interval)
+
         self._emit(ExecutionEvent.RESULT, "长按完成")
         self._wait_after(wait_min, wait_max)
 
@@ -341,7 +386,16 @@ class ScriptExecutor:
         self._emit(ExecutionEvent.RESULT, "找到目标", {"coord": res})
         self._smart_move(tx, ty, move_enable, move_time_min, move_time_max)
         interval = Utils.get_random_time(interval_min, interval_max)
-        self.action.mouse_click(x=None, y=None, button=button, repeat=repeat, duration=duration_s, interval=interval)
+
+        for i in range(repeat):
+            if self._is_stopped(): break
+            self.action.mouse_down(button)
+            completed = self._countdown_wait(duration_s, "长按")
+            self.action.mouse_up(button)
+            if not completed or self._is_stopped(): break
+            if repeat > 1 and i < repeat - 1:
+                time.sleep(interval)
+
         self._wait_after(wait_min, wait_max)
         return True
 
@@ -432,7 +486,16 @@ class ScriptExecutor:
         """执行键盘长按"""
         self._emit(ExecutionEvent.STEP_START, f"长按键 {key_code} {duration_s}s")
         interval = Utils.get_random_time(interval_min, interval_max)
-        self.action.key_press(key_code, repeat=repeat, duration=duration_s, interval=interval)
+
+        for i in range(repeat):
+            if self._is_stopped(): break
+            self.action.key_down(key_code)
+            completed = self._countdown_wait(duration_s, "长按")
+            self.action.key_up(key_code)
+            if not completed or self._is_stopped(): break
+            if repeat > 1 and i < repeat - 1:
+                time.sleep(interval)
+
         self._emit(ExecutionEvent.RESULT, "长按完成")
         self._wait_after(wait_min, wait_max)
 
@@ -457,30 +520,9 @@ class ScriptExecutor:
         extra = random.uniform(0, random_add_s)
         final_time = time_s + extra
 
-        if final_time > 1.0:
-            # 较长等待：分段sleep并定期汇报剩余时间
-            self._emit(ExecutionEvent.STEP_START, f"等待 {final_time:.1f}s")
-            start_time = time.time()
-            last_reported_sec = -1
-            while True:
-                if self._is_stopped():
-                    self._emit(ExecutionEvent.WARNING, "等待被中止")
-                    return
-                elapsed = time.time() - start_time
-                remaining = final_time - elapsed
-                if remaining <= 0:
-                    self._emit(ExecutionEvent.RESULT, "等待结束")
-                    break
-                current_rem_sec = int(remaining)
-                if current_rem_sec != last_reported_sec and current_rem_sec > 0:
-                    self._emit(ExecutionEvent.RESULT, f"还需等待 {current_rem_sec} 秒")
-                    last_reported_sec = current_rem_sec
-                time.sleep(0.1)
-        else:
-            # 较短等待：直接sleep
-            self._emit(ExecutionEvent.DEBUG, f"执行等待: {final_time:.2f}s")
-            if final_time > 0:
-                time.sleep(final_time)
+        self._emit(ExecutionEvent.STEP_START, f"等待 {final_time:.1f}s")
+        if self._countdown_wait(final_time, "等待"):
+            self._emit(ExecutionEvent.RESULT, "等待结束")
 
     # ==================== 条件判断（If/Else/End） ====================
 

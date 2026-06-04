@@ -163,7 +163,7 @@ class SignalBridge(QObject):
 # ========================================================================
 class QuickReplaceWindow(QDialog):
     def __init__(self, task_name, image_data_map, task_manager, parent_editor):
-        super().__init__(parent_editor)
+        super().__init__(None)
         self.task_name = task_name
         self.image_data_map = image_data_map
         self.task_manager = task_manager
@@ -177,8 +177,10 @@ class QuickReplaceWindow(QDialog):
 
         self.setWindowTitle(f"快捷替换图片 - {self.task_name}")
         self.resize(UIDims.WINDOW_REPLACE_W, UIDims.WINDOW_REPLACE_H)
+
+        self.setWindowFlags(Qt.Window | Qt.WindowStaysOnTopHint)
         self.setWindowModality(Qt.NonModal)
-        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        self.saved_geometry = None
 
         self._init_ui()
 
@@ -308,6 +310,8 @@ class QuickReplaceWindow(QDialog):
 
     def start_quick_shot(self, img_filename):
         """隐藏窗口 -> 开启截图 -> 处理结果 -> 恢复显示"""
+        self.saved_geometry = self.saveGeometry() # 隐藏前保存当前窗口的尺寸和位置
+
         # 1. 静默隐藏当前弹窗，避免遮挡截图视线
         self.hide()
 
@@ -319,8 +323,14 @@ class QuickReplaceWindow(QDialog):
 
         # 信号 B：工具窗口关闭
         self.tool_window.setAttribute(Qt.WA_DeleteOnClose)  # 关闭时释放内存
-        self.tool_window.destroyed.connect(lambda: self.show())
+        self.tool_window.destroyed.connect(self.restore_and_show)
         self.tool_window.show()
+
+    def restore_and_show(self):
+        """截图结束后，恢复窗口至原位置"""
+        if self.saved_geometry:
+            self.restoreGeometry(self.saved_geometry)
+        self.show()
 
     def _handle_capture_success(self, pixmap, img_filename):
         """截图完成后的数据覆写工作"""
@@ -1309,10 +1319,13 @@ class ManageTaskWidget(QWidget):
         btn_edit.clicked.connect(self.go_to_edit)
         btn_rename = QPushButton("重命名")
         btn_rename.clicked.connect(self.rename_task)
+        btn_delete = QPushButton("删除")
+        btn_delete.clicked.connect(self.delete_task)
         btn_refresh = QPushButton("刷新")
         btn_refresh.clicked.connect(self.refresh_list)
         btn_layout.addWidget(btn_edit)
         btn_layout.addWidget(btn_rename)
+        btn_layout.addWidget(btn_delete) 
         btn_layout.addWidget(btn_refresh)
         e_layout.addWidget(self.list_tasks)
         e_layout.addLayout(btn_layout)
@@ -1358,6 +1371,33 @@ class ManageTaskWidget(QWidget):
                 self.refresh_list()
             else:
                 QMessageBox.warning(self, "错误", msg)
+
+    def delete_task(self):
+        """删除选中的任务"""
+        item = self.list_tasks.currentItem()
+        if not item:
+            QMessageBox.warning(self, "提示", "请先选择要删除的任务")
+            return
+        task_name = item.text()
+        reply = QMessageBox.question(
+            self,
+            "确认删除",
+            f"确定要永久删除任务【{task_name}】的所有文件吗？\n此操作不可恢复！",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            success, msg = self.task_manager.delete_task(task_name)
+            if success:
+                self.refresh_list()
+                QMessageBox.information(self, "成功", f"任务【{task_name}】已被删除。")
+                # 如果当前任务编辑器正好打开着被删除的任务，将其强制重置回草稿任务
+                if self.main_window.tab_editor.current_task_name == task_name:
+                    self.main_window.tab_editor.open_task(TaskManager.DRAFT_TASK_NAME)
+            else:
+                QMessageBox.warning(self, "删除失败", msg)
+
+
 
     def go_to_edit(self):
         """跳转到编辑器编辑选中任务"""

@@ -216,6 +216,8 @@ class ActionDriver:
         self.lg_mouse = None
         self.lg_keyboard = None
 
+        self.check_stop_func = None
+
         driver_files_exist = HAS_LG_DRIVER_FILE
 
         # 检测硬件驱动设备是否可用
@@ -247,6 +249,16 @@ class ActionDriver:
                 print("软件模拟已启用")
             self.use_driver = False
 
+    # 任务停止状态检查
+    def _is_stopped(self):
+        if self.check_stop_func:
+            return not self.check_stop_func()
+        return False
+
+    def set_stop_check(self, func):
+        self.check_stop_func = func
+
+
     @staticmethod
     def is_driver_available():
         """返回硬件驱动是否可用"""
@@ -254,7 +266,9 @@ class ActionDriver:
 
     def mouse_move(self, x, y, duration=0.5):
         """鼠标移动到目标坐标，使用贝塞尔曲线模拟自然轨迹，支持偏移重路由和末端精确校正"""
-        target_x, target_y = int(x), int(y)
+        w, h = Utils.get_screen_size()
+        target_x = max(0, min(w - 1, int(x)))
+        target_y = max(0, min(h - 1, int(y)))
 
         original_duration = duration
         original_start_x, original_start_y = Utils.get_cursor_pos()
@@ -271,6 +285,7 @@ class ActionDriver:
         REROUTE_THRESHOLD = 50  # 实际位置偏离路径超过此值时重新规划
 
         while True:
+            if self._is_stopped(): break
             curr_x, curr_y = Utils.get_cursor_pos()
             dist_to_target = Utils.get_distance(curr_x, curr_y, target_x, target_y)
 
@@ -302,6 +317,7 @@ class ActionDriver:
 
             # 沿路径逐步移动
             for i, (next_ideal_x, next_ideal_y) in enumerate(path_points):
+                if self._is_stopped(): break
                 real_x, real_y = Utils.get_cursor_pos()
                 deviation = Utils.get_distance(real_x, real_y, next_ideal_x, next_ideal_y)
 
@@ -329,21 +345,24 @@ class ActionDriver:
                 target_timestamp = path_start_time + time_slice
                 Utils.precise_wait(target_timestamp)
 
-            if not reroute_triggered:
+            if not reroute_triggered or self._is_stopped():
                 break
 
-        if self.use_driver:
-            self._hw_correction(target_x, target_y, timeout=1.0, step_div=3, limit=20, sleep_s=0.012)
-        else:
-            curr_x, curr_y = Utils.get_cursor_pos()
-            if curr_x != target_x or curr_y != target_y:
-                pyautogui.moveTo(target_x, target_y)
+        if not self._is_stopped():
+            if self.use_driver:
+                self._hw_correction(target_x, target_y, timeout=1.0, step_div=3, limit=20, sleep_s=0.012)
+            else:
+                curr_x, curr_y = Utils.get_cursor_pos()
+                if curr_x != target_x or curr_y != target_y:
+                    pyautogui.moveTo(target_x, target_y)
 
         pyautogui.PAUSE = original_pause
 
     def mouse_move_linear(self, x, y, duration=0.0):
         """鼠标直线匀速移动到目标坐标"""
-        target_x, target_y = int(x), int(y)
+        w, h = Utils.get_screen_size()
+        target_x = max(0, min(w - 1, int(x)))
+        target_y = max(0, min(h - 1, int(y)))
         # ── 瞬移：耗时为 0 ──
         if duration < 0.001:
             if self.use_driver:
@@ -364,6 +383,7 @@ class ActionDriver:
         start_time = time.perf_counter()
 
         for i in range(1, steps + 1):
+            if self._is_stopped(): break
             progress = i / steps
             next_x = start_x + (target_x - start_x) * progress
             next_y = start_y + (target_y - start_y) * progress
@@ -381,7 +401,7 @@ class ActionDriver:
                 pyautogui.platformModule._moveTo(int(next_x), int(next_y))
             target_timestamp = start_time + (i / steps) * duration
             Utils.precise_wait(target_timestamp)
-        if self.use_driver:
+        if not self._is_stopped() and self.use_driver:
             self._hw_correction(target_x, target_y, timeout=1.0, step_div=3, limit=20, sleep_s=0.012)
 
         pyautogui.PAUSE = original_pause
@@ -390,6 +410,7 @@ class ActionDriver:
         """硬件模式末端校正：逐步微调直到鼠标到达目标位置"""
         deadline = time.perf_counter() + timeout
         while time.perf_counter() < deadline:
+            if self._is_stopped(): break
             curr_x, curr_y = Utils.get_cursor_pos()
             diff_x = target_x - curr_x
             diff_y = target_y - curr_y
@@ -411,12 +432,22 @@ class ActionDriver:
             sy = max(-limit, min(limit, sy))
 
             self.lg_mouse.move_relative(sx, sy)
-            time.sleep(sleep_s)
+            
+            wait_start = time.perf_counter()
+            while time.perf_counter() - wait_start < 0.015:
+                if self._is_stopped(): break
+                check_x, check_y = Utils.get_cursor_pos()
+                if check_x != curr_x or check_y != curr_y:
+                    break
+                time.sleep(0)
+
+            # time.sleep(sleep_s)
 
     def _hardware_move_to_instant(self, tx, ty):
         """硬件模式：尽快移动到目标位置"""
         timeout = time.perf_counter() + 2.0
         while time.perf_counter() < timeout:
+            if self._is_stopped(): break
             cx, cy = Utils.get_cursor_pos()
             dx = tx - cx
             dy = ty - cy
@@ -436,6 +467,7 @@ class ActionDriver:
         start_time = time.perf_counter()
 
         while True:
+            if self._is_stopped(): break
             elapsed = time.perf_counter() - start_time
             if elapsed >= duration:
                 break
@@ -482,6 +514,7 @@ class ActionDriver:
         start_time = time.perf_counter()
         for i in range(1, steps + 1):
             # 计算每步应移动的真实增量，避免浮点数截断导致的误差累积
+            if self._is_stopped(): break
             move_x = int(step_dx * i) - int(step_dx * (i - 1))
             move_y = int(step_dy * i) - int(step_dy * (i - 1))
 
@@ -502,7 +535,10 @@ class ActionDriver:
         if x is not None and y is not None:
             self.mouse_move(x, y, 0.5)
 
+        time.sleep(0) 
+
         for i in range(repeat):
+            if self._is_stopped(): break
             if self.use_driver:
                 btn_code = lgdriver.MouseButton.LEFT
                 if button == "right":
@@ -525,7 +561,8 @@ class ActionDriver:
     def mouse_drag(self, start_x, start_y, end_x, end_y, duration=0.8, button="left"):
         """鼠标拖拽"""
         self.mouse_move(start_x, start_y, duration=0.3)
-        time.sleep(0.1)
+        time.sleep(0)
+        time.sleep(0.03)
 
         if self.use_driver:
             btn_code = lgdriver.MouseButton.LEFT
@@ -535,9 +572,10 @@ class ActionDriver:
         else:
             pyautogui.mouseDown(button=button)
 
-        time.sleep(0.05)
+        time.sleep(0)
+        time.sleep(0.03)
         self.mouse_move(end_x, end_y, duration=duration)
-        time.sleep(0.05)
+        time.sleep(0)
 
         if self.use_driver:
             self.lg_mouse.up()
@@ -560,6 +598,7 @@ class ActionDriver:
             return
 
         for i in range(repeat):
+            if self._is_stopped(): break
             if self.use_driver:
                 # 硬件模式：将按键名映射为 HID 码后发送
                 hid_codes, unsupported_keys = Utils.map_key_names(keys_to_press, lgdriver.KEY_MAP)
