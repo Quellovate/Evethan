@@ -97,7 +97,7 @@ class WidgetFactory:
 class HistoryManager:
     """管理撤销(Undo)和重做(Redo)操作，基于快照机制"""
 
-    def __init__(self, timeline, max_history=30):
+    def __init__(self, timeline, max_history=50):
         self.timeline = timeline
         self.undo_stack = deque(maxlen=max_history)  # 撤销栈
         self.redo_stack = deque(maxlen=max_history)  # 重做栈
@@ -108,7 +108,8 @@ class HistoryManager:
         if self.is_performing_undo_redo:
             return
         current_state = self.timeline.get_all_data_deep_copy()
-        self.undo_stack.append((current_state, action_name))
+        focus_row = self.timeline.currentRow() if self.timeline.currentRow() != -1 else 0
+        self.undo_stack.append((current_state, action_name, focus_row))
         self.redo_stack.clear()  # 新操作后清空重做栈
         self.timeline.history_changed.emit()
 
@@ -118,16 +119,17 @@ class HistoryManager:
             return
         self.is_performing_undo_redo = True
         try:
-            current_row = self.timeline.currentRow()
+            curr_row = self.timeline.currentRow()
+            curr_scroll = self.timeline.verticalScrollBar().value()
             current_state = self.timeline.get_all_data_deep_copy()
-            prev_state_data, action_name = self.undo_stack.pop()
-            self.redo_stack.append((current_state, action_name))
+            prev_state_data, action_name, focus_row = self.undo_stack.pop()
+            self.redo_stack.append((current_state, action_name, curr_row))
             self.timeline.load_from_data(prev_state_data)
-            # 尝试保持选中行不变
-            if current_row != -1 and current_row < self.timeline.count():
-                self.timeline.setCurrentRow(current_row)
-                item = self.timeline.item(current_row)
+            if focus_row != -1 and focus_row < self.timeline.count():
+                self.timeline.setCurrentRow(focus_row)
+                item = self.timeline.item(focus_row)
                 self.timeline.on_item_clicked(item)
+            self.timeline._scroll_to(focus_row, curr_scroll)
             self.timeline.history_changed.emit()
         finally:
             self.is_performing_undo_redo = False
@@ -138,15 +140,17 @@ class HistoryManager:
             return
         self.is_performing_undo_redo = True
         try:
-            current_row = self.timeline.currentRow()
+            curr_row = self.timeline.currentRow()
+            curr_scroll = self.timeline.verticalScrollBar().value()
             current_state = self.timeline.get_all_data_deep_copy()
-            next_state_data, action_name = self.redo_stack.pop()
-            self.undo_stack.append((current_state, action_name))
+            next_state_data, action_name, focus_row = self.redo_stack.pop()
+            self.undo_stack.append((current_state, action_name, curr_row))
             self.timeline.load_from_data(next_state_data)
-            if current_row != -1 and current_row < self.timeline.count():
-                self.timeline.setCurrentRow(current_row)
-                item = self.timeline.item(current_row)
+            if focus_row != -1 and focus_row < self.timeline.count():
+                self.timeline.setCurrentRow(focus_row)
+                item = self.timeline.item(focus_row)
                 self.timeline.on_item_clicked(item)
+            self.timeline._scroll_to(focus_row, curr_scroll)
             self.timeline.history_changed.emit()
         finally:
             self.is_performing_undo_redo = False
@@ -223,7 +227,6 @@ class TaskDelegate(QStyledItemDelegate):
             is_active_pair = True
         is_highlight = is_selected or is_active_pair
 
-        
         if "loop_" in cmd_type:
             bg_color = UIColors.BG_LOOP_SEL if is_highlight else UIColors.BG_LOOP
         elif "group_" in cmd_type:
@@ -457,13 +460,14 @@ class ScriptTimeline(QListWidget):
         self.setAcceptDrops(True)
         self.setDragEnabled(True)
         self.setDragDropMode(QAbstractItemView.InternalMove)
+        self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self.setItemDelegate(TaskDelegate())
         self.setFocusPolicy(Qt.ClickFocus)
         self.setStyleSheet(UIStyles.TIMELINE_BASE)
         self.itemClicked.connect(self.on_item_clicked)
 
         # 初始化历史管理器，并将回调传递给属性面板
-        self.history_mgr = HistoryManager(self, max_history=30)
+        self.history_mgr = HistoryManager(self, max_history=50)
         self.property_panel.set_history_callback(self.history_mgr.create_snapshot)
         self.property_panel.set_undo_redo_callbacks(self.history_mgr.undo, self.history_mgr.redo)
 
@@ -512,7 +516,36 @@ class ScriptTimeline(QListWidget):
         """检查是否有任何指令被勾选"""
         return any(self.item(i).data(Qt.UserRole).get("checked", False) for i in range(self.count()))
 
+    def _calculate_item_y(self, target_row):
+        """计算指定指令的顶部绝对坐标"""
+        if target_row <= 0:
+            return 0
+        total_y = 0
+        for i in range(min(target_row, self.count())):
+            item = self.item(i)
+            if item and not item.isHidden():
+                total_y += item.sizeHint().height()
+        return total_y
+
     # -------------------- UI刷新 --------------------
+
+    def _scroll_to(self, target_row, original_scroll_val):
+        """自动移动滚动条"""
+
+        def do_scroll():
+            target_y = self._calculate_item_y(target_row)
+            view_h = self.viewport().height()
+            view_top = original_scroll_val
+            view_bottom = original_scroll_val + view_h
+            if view_top <= target_y <= view_bottom:
+                new_val = original_scroll_val
+            else:
+                new_val = target_y - 100
+            max_val = self.verticalScrollBar().maximum()
+            new_val = max(0, min(new_val, max_val))
+            self.verticalScrollBar().setValue(new_val)
+
+        QTimer.singleShot(0, do_scroll)
 
     def refresh_ui(self):
         """统一刷新：更新缩进缓存 → 刷新行号 → 发出结构变化信号"""
@@ -579,9 +612,7 @@ class ScriptTimeline(QListWidget):
     # -------------------- 数据加载/重建 --------------------
 
     def refresh_with_data(self, new_data_list):
-        """用新的数据列表完整重建编排状态（保持滚动位置）"""
-        self.setUpdatesEnabled(False)
-        scroll_val = self.verticalScrollBar().value()
+        """用新的数据列表完整重建编排状态"""
         self.clear()
         for data in new_data_list:
             data["checked"] = False
@@ -589,7 +620,6 @@ class ScriptTimeline(QListWidget):
             self.addItem(item)
         self._apply_fold_states()
         self.refresh_ui()
-        self.verticalScrollBar().setValue(scroll_val)
         self.setUpdatesEnabled(True)
 
     def load_from_data(self, script_data):
@@ -662,7 +692,7 @@ class ScriptTimeline(QListWidget):
 
     def _insert_cmd_at(self, row, cmd_type_or_data, data=None):
         """在指定行插入一条指令（支持传入 cmd_type 字符串或完整 data 字典）"""
-        current_scroll = self.verticalScrollBar().value()
+        orig_scroll = self.verticalScrollBar().value()
         self.setUpdatesEnabled(False)
         full_config = global_config.get_config()
         if isinstance(cmd_type_or_data, dict):
@@ -686,8 +716,8 @@ class ScriptTimeline(QListWidget):
         self.insertItem(row, item)
         self.refresh_ui()
         self.setCurrentItem(item)
-        self.verticalScrollBar().setValue(current_scroll)
         self.setUpdatesEnabled(True)
+        self._scroll_to(row, orig_scroll)
 
     # -------------------- 按键录制（内联） --------------------
 
@@ -955,15 +985,15 @@ class ScriptTimeline(QListWidget):
         y = pos.y()
 
         if y < self._scroll_margin:
-            # 靠近顶部边缘：向上滚动。速度随距离边缘越近越快（最少2像素/帧）
-            self._scroll_speed = -int(max(2, (self._scroll_margin - y) / 16))
+            # 靠近顶部边缘：向上滚动。速度随距离边缘越近越快（最少8像素/帧）
+            self._scroll_speed = -int(max(8, (self._scroll_margin - y) * 2))
             if not self._scroll_timer.isActive():
-                self._scroll_timer.start(30)
+                self._scroll_timer.start(20)
         elif y > viewport_height - self._scroll_margin:
             # 靠近底部边缘：向下滚动
-            self._scroll_speed = int(max(2, (y - (viewport_height - self._scroll_margin)) / 16))
+            self._scroll_speed = int(max(8, (y - (viewport_height - self._scroll_margin)) * 2))
             if not self._scroll_timer.isActive():
-                self._scroll_timer.start(30)
+                self._scroll_timer.start(20)
         else:
             # 鼠标在安全区中心，停止滚动
             self._scroll_timer.stop()
@@ -1013,6 +1043,7 @@ class ScriptTimeline(QListWidget):
     def dropEvent(self, event):
         """拖拽放下：执行移动/添加操作，并验证结构合法性"""
         self._scroll_timer.stop()
+        orig_scroll = self.verticalScrollBar().value()
         # 记录来源行号（用于历史记录描述）
         source_rows = []
         if event.source() == self and self._dragged_items:
@@ -1094,6 +1125,7 @@ class ScriptTimeline(QListWidget):
         self._dragged_items = []
         self.active_pair_info = None
         self.viewport().update()
+        self._scroll_to(target_row, orig_scroll)
 
     # -------------------- 数据创建辅助 --------------------
 
@@ -1153,6 +1185,7 @@ class ScriptTimeline(QListWidget):
 
     def move_current_item(self, direction):
         """上移(-1)或下移(+1)当前选中的指令"""
+        orig_scroll = self.verticalScrollBar().value()
         current_row = self.currentRow()
         if (
             current_row == -1
@@ -1167,6 +1200,7 @@ class ScriptTimeline(QListWidget):
         self.setCurrentRow(target_row)
         self.refresh_ui()
         self._validate_and_fix_structure(self.get_all_data())
+        self._scroll_to(target_row, orig_scroll)
 
     # -------------------- 键盘快捷键 --------------------
 
@@ -1226,7 +1260,7 @@ class ScriptTimeline(QListWidget):
 
     def delete_selection(self):
         """删除勾选项或当前选中项"""
-        current_scroll = self.verticalScrollBar().value()
+        orig_scroll = self.verticalScrollBar().value()
         self.setUpdatesEnabled(False)
         # 优先删除勾选项，否则删除列表选中项
         items_to_delete = [self.item(i) for i in range(self.count()) if self.item(i).data(Qt.UserRole).get("checked")]
@@ -1235,6 +1269,7 @@ class ScriptTimeline(QListWidget):
         if not items_to_delete:
             self.setUpdatesEnabled(True)
             return
+        min_affected_row = min([self.row(it) for it in items_to_delete])  # 受操作的最上方指令行序号
         rows = sorted([self.row(it) + 1 for it in items_to_delete])
         if len(rows) == 1:
             self.history_mgr.create_snapshot(f"删除第 {rows[0]} 行的 [{self._get_item_desc(items_to_delete[0])}]")
@@ -1245,8 +1280,8 @@ class ScriptTimeline(QListWidget):
             self.takeItem(row)
         self.refresh_ui()
         self.property_panel.clear_panel()
-        self.verticalScrollBar().setValue(current_scroll)
         self.setUpdatesEnabled(True)
+        self._scroll_to(min_affected_row, orig_scroll)
 
     def copy_selection(self):
         """将勾选项或选中项的数据复制到剪贴板（JSON格式）"""
@@ -1258,6 +1293,7 @@ class ScriptTimeline(QListWidget):
 
     def paste_selection(self):
         """从剪贴板粘贴指令数据，并验证结构合法性"""
+        orig_scroll = self.verticalScrollBar().value()
         curr_idx = self.currentRow() if self.currentRow() != -1 else self.count()
         target_row = curr_idx + 1
         try:
@@ -1284,6 +1320,7 @@ class ScriptTimeline(QListWidget):
             QMessageBox.warning(self, "无法粘贴", f"粘贴后会导致结构错误：\n{msg}")
             return
         self.refresh_with_data(simulated_list)
+        self._scroll_to(target_row, orig_scroll)
 
     # -------------------- 点击事件 --------------------
 

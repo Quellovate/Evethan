@@ -107,6 +107,8 @@ class GlobalHotkeyHandler(QObject):
 
     def __init__(self):
         super().__init__()
+        self._last_trigger_time = {"run": 0.0, "stop": 0.0, "osd": 0.0}
+        self._cooldown = 0.5
 
     def start(self):
         """首次启动时加载快捷键"""
@@ -122,17 +124,29 @@ class GlobalHotkeyHandler(QObject):
             pass
 
         shortcuts = global_config.get_shortcuts()
-        run_key = shortcuts.get("run_task", "f8")
-        stop_key = shortcuts.get("stop_task", "f9")
-        osd_key = shortcuts.get("toggle_osd", "f10")
+        run_key = shortcuts.get("run_task", "f8").lower()
+        stop_key = shortcuts.get("stop_task", "f9").lower()
+        osd_key = shortcuts.get("toggle_osd", "f10").lower()
+
+        def hook_callback(event):
+            if event.event_type == keyboard.KEY_DOWN:
+                current = time.perf_counter()
+                try:
+                    if stop_key and keyboard.is_pressed(stop_key):
+                        if current - self._last_trigger_time["stop"] > self._cooldown:
+                            self._last_trigger_time["stop"] = current
+                            self.sig_stop.emit()
+                    elif run_key and keyboard.is_pressed(run_key):
+                        if current - self._last_trigger_time["run"] > self._cooldown:
+                            self._last_trigger_time["run"] = current
+                            self.sig_run.emit()
+                    elif osd_key and keyboard.is_pressed(osd_key):
+                        self.sig_toggle_osd.emit()
+                except ValueError:
+                    pass
 
         try:
-            if run_key:
-                keyboard.add_hotkey(run_key, self.sig_run.emit)
-            if stop_key:
-                keyboard.add_hotkey(stop_key, self.sig_stop.emit)
-            if osd_key:
-                keyboard.add_hotkey(osd_key, self.sig_toggle_osd.emit)
+            keyboard.hook(hook_callback)
             print(f"全局快捷键已加载: 运行[{run_key}], 停止[{stop_key}], 悬浮日志[{osd_key}]")
         except Exception as e:
             print(f"全局快捷键注册失败: {e}")
@@ -310,7 +324,7 @@ class QuickReplaceWindow(QDialog):
 
     def start_quick_shot(self, img_filename):
         """隐藏窗口 -> 开启截图 -> 处理结果 -> 恢复显示"""
-        self.saved_geometry = self.saveGeometry() # 隐藏前保存当前窗口的尺寸和位置
+        self.saved_geometry = self.saveGeometry()  # 隐藏前保存当前窗口的尺寸和位置
 
         # 1. 静默隐藏当前弹窗，避免遮挡截图视线
         self.hide()
@@ -1325,7 +1339,7 @@ class ManageTaskWidget(QWidget):
         btn_refresh.clicked.connect(self.refresh_list)
         btn_layout.addWidget(btn_edit)
         btn_layout.addWidget(btn_rename)
-        btn_layout.addWidget(btn_delete) 
+        btn_layout.addWidget(btn_delete)
         btn_layout.addWidget(btn_refresh)
         e_layout.addWidget(self.list_tasks)
         e_layout.addLayout(btn_layout)
@@ -1384,7 +1398,7 @@ class ManageTaskWidget(QWidget):
             "确认删除",
             f"确定要永久删除任务【{task_name}】的所有文件吗？\n此操作不可恢复！",
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+            QMessageBox.No,
         )
         if reply == QMessageBox.Yes:
             success, msg = self.task_manager.delete_task(task_name)
@@ -1396,8 +1410,6 @@ class ManageTaskWidget(QWidget):
                     self.main_window.tab_editor.open_task(TaskManager.DRAFT_TASK_NAME)
             else:
                 QMessageBox.warning(self, "删除失败", msg)
-
-
 
     def go_to_edit(self):
         """跳转到编辑器编辑选中任务"""

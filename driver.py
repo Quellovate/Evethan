@@ -3,6 +3,8 @@
 import os
 import random
 import time
+import math
+
 from typing import Tuple
 
 import pyautogui
@@ -19,8 +21,19 @@ except ImportError:
     HAS_LG_DRIVER_FILE = False
     print("未找到 lgdriver，将仅支持软件模拟")
 
-pyautogui.FAILSAFE = True
+pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0.01
+
+HW_CONFIG = {
+    "MIN_NODE_DIST": 8,
+    "REROUTE_THRESHOLD": 50,
+    "CORRECTION_RADIUS": 20,
+    "ANTI_OVERSHOOT_DIST": 5,
+    "ANGLE_THRESHOLD": 20.0,
+    "DAMPING_FACTOR": 0.4,
+    "REFRESH_RATE": 120,
+    "HW_MOVE_LIMIT": 127,
+}
 
 
 class TargetDriver:
@@ -258,14 +271,20 @@ class ActionDriver:
     def set_stop_check(self, func):
         self.check_stop_func = func
 
-
     @staticmethod
     def is_driver_available():
         """返回硬件驱动是否可用"""
         return ActionDriver.DRIVER_DETECTED
 
     def mouse_move(self, x, y, duration=0.5):
-        """鼠标移动到目标坐标，使用贝塞尔曲线模拟自然轨迹，支持偏移重路由和末端精确校正"""
+        """鼠标移动：软件模拟或硬件模拟"""
+        if self.use_driver:
+            self._hw_mouse_move(x, y, duration)
+        else:
+            self._sw_mouse_move(x, y, duration)
+
+    def _sw_mouse_move(self, x, y, duration=0.5):
+        """软件模拟鼠标移动：使用贝塞尔曲线模拟自然轨迹，支持偏移重路由和末端精确校正"""
         w, h = Utils.get_screen_size()
         target_x = max(0, min(w - 1, int(x)))
         target_y = max(0, min(h - 1, int(y)))
@@ -285,7 +304,8 @@ class ActionDriver:
         REROUTE_THRESHOLD = 50  # 实际位置偏离路径超过此值时重新规划
 
         while True:
-            if self._is_stopped(): break
+            if self._is_stopped():
+                break
             curr_x, curr_y = Utils.get_cursor_pos()
             dist_to_target = Utils.get_distance(curr_x, curr_y, target_x, target_y)
 
@@ -317,7 +337,8 @@ class ActionDriver:
 
             # 沿路径逐步移动
             for i, (next_ideal_x, next_ideal_y) in enumerate(path_points):
-                if self._is_stopped(): break
+                if self._is_stopped():
+                    break
                 real_x, real_y = Utils.get_cursor_pos()
                 deviation = Utils.get_distance(real_x, real_y, next_ideal_x, next_ideal_y)
 
@@ -326,19 +347,7 @@ class ActionDriver:
                     reroute_triggered = True
                     break
 
-                dx = int(next_ideal_x - real_x)
-                dy = int(next_ideal_y - real_y)
-
-                # 限制单步最大位移
-                limit = 50
-                dx = max(-limit, min(limit, dx))
-                dy = max(-limit, min(limit, dy))
-
-                if self.use_driver:
-                    if dx != 0 or dy != 0:
-                        self.lg_mouse.move_relative(dx, dy)
-                else:
-                    pyautogui.platformModule._moveTo(int(next_ideal_x), int(next_ideal_y))
+                pyautogui.platformModule._moveTo(int(next_ideal_x), int(next_ideal_y))
 
                 # 按时间片精确等待，保持移动速度一致
                 time_slice = (i + 1) / steps * adjusted_duration
@@ -349,14 +358,154 @@ class ActionDriver:
                 break
 
         if not self._is_stopped():
-            if self.use_driver:
-                self._hw_correction(target_x, target_y, timeout=1.0, step_div=3, limit=20, sleep_s=0.012)
-            else:
-                curr_x, curr_y = Utils.get_cursor_pos()
-                if curr_x != target_x or curr_y != target_y:
-                    pyautogui.moveTo(target_x, target_y)
+            curr_x, curr_y = Utils.get_cursor_pos()
+            if curr_x != target_x or curr_y != target_y:
+                pyautogui.moveTo(target_x, target_y)
 
         pyautogui.PAUSE = original_pause
+
+    def _hw_mouse_move(self, target_x, target_y, duration):
+        """硬件模拟鼠标移动"""
+        w, h = Utils.get_screen_size()
+        target_x = max(0, min(w - 1, int(target_x)))
+        target_y = max(0, min(h - 1, int(target_y)))
+
+        global_start_time = time.perf_counter()
+        global_deadline = global_start_time + duration
+        frame_duration = 1.0 / HW_CONFIG["REFRESH_RATE"]
+
+        while True:
+            if self._is_stopped():
+                break
+            curr_x, curr_y = Utils.get_cursor_pos()
+            dist_to_target = Utils.get_distance(curr_x, curr_y, target_x, target_y)
+
+            now = time.perf_counter()
+            remaining_time = global_deadline - now
+
+            # 接近目标或时间耗尽，进入末端校正
+            if dist_to_target <= HW_CONFIG["CORRECTION_RADIUS"] or remaining_time <= 0.05:
+                break
+
+            temp_steps = int(max(20, remaining_time * HW_CONFIG["REFRESH_RATE"]))
+            ctrl_1_x = curr_x + (target_x - curr_x) * random.uniform(0.2, 0.4) + random.randint(-10, 10)
+            ctrl_1_y = curr_y + (target_y - curr_y) * random.uniform(0.1, 0.3) + random.randint(-10, 10)
+            ctrl_2_x = curr_x + (target_x - curr_x) * random.uniform(0.6, 0.8) + random.randint(-10, 10)
+            ctrl_2_y = curr_y + (target_y - curr_y) * random.uniform(0.7, 0.9) + random.randint(-10, 10)
+
+            raw_path = Utils.get_bezier_curve(
+                (curr_x, curr_y), (target_x, target_y), ((ctrl_1_x, ctrl_1_y), (ctrl_2_x, ctrl_2_y)), temp_steps
+            )
+
+            # 降采样生成稀疏节点
+            sparse_nodes = []
+            sparse_nodes.append({"x": curr_x, "y": curr_y, "vec_to_target": (target_x - curr_x, target_y - curr_y)})
+            last_node_pos = (curr_x, curr_y)
+
+            for px, py in raw_path:
+                if Utils.get_distance(last_node_pos[0], last_node_pos[1], px, py) >= HW_CONFIG["MIN_NODE_DIST"]:
+                    sparse_nodes.append({"x": px, "y": py, "vec_to_target": (target_x - px, target_y - py)})
+                    last_node_pos = (px, py)
+
+            last_node = sparse_nodes[-1]
+            if Utils.get_distance(last_node["x"], last_node["y"], target_x, target_y) > 1.0:
+                sparse_nodes.append({"x": target_x, "y": target_y, "vec_to_target": (0.0, 0.0)})
+
+            reroute_triggered = False
+            last_stable_dist = dist_to_target
+
+            # 沿稀疏节点移动
+            while time.perf_counter() < global_deadline:
+                if self._is_stopped():
+                    break
+                loop_start = time.perf_counter()
+                curr_x, curr_y = Utils.get_cursor_pos()
+                current_d = Utils.get_distance(curr_x, curr_y, target_x, target_y)
+
+                if current_d <= HW_CONFIG["CORRECTION_RADIUS"]:
+                    break
+
+                # 过冲检测
+                if current_d > last_stable_dist + HW_CONFIG["ANTI_OVERSHOOT_DIST"]:
+                    reroute_triggered = True
+                    break
+                last_stable_dist = current_d
+
+                # 寻找最近节点
+                closest_idx = 0
+                min_dist_to_path = float("inf")
+                for i, node in enumerate(sparse_nodes):
+                    dist = Utils.get_distance(curr_x, curr_y, node["x"], node["y"])
+                    if dist < min_dist_to_path:
+                        min_dist_to_path = dist
+                        closest_idx = i
+
+                # 寻找下一个目标节点
+                next_node = None
+                for i in range(closest_idx + 1, len(sparse_nodes)):
+                    node = sparse_nodes[i]
+                    if Utils.get_distance(curr_x, curr_y, node["x"], node["y"]) >= HW_CONFIG["MIN_NODE_DIST"]:
+                        next_node = node
+                        break
+                if not next_node:
+                    next_node = sparse_nodes[-1]
+
+                # 偏航检测
+                if Utils.get_distance(curr_x, curr_y, next_node["x"], next_node["y"]) > HW_CONFIG["REROUTE_THRESHOLD"]:
+                    reroute_triggered = True
+                    break
+
+                rem_time_inner = global_deadline - loop_start
+                if rem_time_inner <= 0.02:
+                    break
+
+                # 计算所需移动速度
+                expected_speed = current_d / rem_time_inner
+                step_mag = expected_speed * frame_duration
+
+                dir_x = next_node["x"] - curr_x
+                dir_y = next_node["y"] - curr_y
+                dist_to_node = math.hypot(dir_x, dir_y)
+
+                if dist_to_node > 0:
+                    dx_float = (dir_x / dist_to_node) * step_mag
+                    dy_float = (dir_y / dist_to_node) * step_mag
+                else:
+                    dx_float, dy_float = 0.0, 0.0
+
+                # 计算转向速度衰减
+                vec_b_x, vec_b_y = next_node["vec_to_target"]
+                len_b = math.hypot(vec_b_x, vec_b_y)
+                if dist_to_node > 1.0 and len_b > 0:
+                    dot_product = dir_x * vec_b_x + dir_y * vec_b_y
+                    cos_theta = max(-1.0, min(1.0, dot_product / (dist_to_node * len_b)))
+                    angle_deg = math.degrees(math.acos(cos_theta))
+                    if angle_deg > HW_CONFIG["ANGLE_THRESHOLD"]:
+                        dx_float *= HW_CONFIG["DAMPING_FACTOR"]
+                        dy_float *= HW_CONFIG["DAMPING_FACTOR"]
+
+                # 依概率舍入移动小数数值
+                move_x = Utils.stochastic_round(dx_float)
+                move_y = Utils.stochastic_round(dy_float)
+
+                move_x = max(-HW_CONFIG["HW_MOVE_LIMIT"], min(HW_CONFIG["HW_MOVE_LIMIT"], move_x))
+                move_y = max(-HW_CONFIG["HW_MOVE_LIMIT"], min(HW_CONFIG["HW_MOVE_LIMIT"], move_y))
+
+                if move_x != 0 or move_y != 0:
+                    self.lg_mouse.move_relative(move_x, move_y)
+
+                # 控制帧率
+                target_timestamp = loop_start + frame_duration
+                while time.perf_counter() < target_timestamp:
+                    if self._is_stopped():
+                        break
+                    time.sleep(0)
+
+            if not reroute_triggered:
+                break
+
+        if not self._is_stopped():
+            self._hw_correction(target_x, target_y, timeout=0.5, step_div=3, limit=15)
 
     def mouse_move_linear(self, x, y, duration=0.0):
         """鼠标直线匀速移动到目标坐标"""
@@ -383,7 +532,8 @@ class ActionDriver:
         start_time = time.perf_counter()
 
         for i in range(1, steps + 1):
-            if self._is_stopped(): break
+            if self._is_stopped():
+                break
             progress = i / steps
             next_x = start_x + (target_x - start_x) * progress
             next_y = start_y + (target_y - start_y) * progress
@@ -410,7 +560,8 @@ class ActionDriver:
         """硬件模式末端校正：逐步微调直到鼠标到达目标位置"""
         deadline = time.perf_counter() + timeout
         while time.perf_counter() < deadline:
-            if self._is_stopped(): break
+            if self._is_stopped():
+                break
             curr_x, curr_y = Utils.get_cursor_pos()
             diff_x = target_x - curr_x
             diff_y = target_y - curr_y
@@ -432,10 +583,11 @@ class ActionDriver:
             sy = max(-limit, min(limit, sy))
 
             self.lg_mouse.move_relative(sx, sy)
-            
+
             wait_start = time.perf_counter()
             while time.perf_counter() - wait_start < 0.015:
-                if self._is_stopped(): break
+                if self._is_stopped():
+                    break
                 check_x, check_y = Utils.get_cursor_pos()
                 if check_x != curr_x or check_y != curr_y:
                     break
@@ -447,7 +599,8 @@ class ActionDriver:
         """硬件模式：尽快移动到目标位置"""
         timeout = time.perf_counter() + 2.0
         while time.perf_counter() < timeout:
-            if self._is_stopped(): break
+            if self._is_stopped():
+                break
             cx, cy = Utils.get_cursor_pos()
             dx = tx - cx
             dy = ty - cy
@@ -467,7 +620,8 @@ class ActionDriver:
         start_time = time.perf_counter()
 
         while True:
-            if self._is_stopped(): break
+            if self._is_stopped():
+                break
             elapsed = time.perf_counter() - start_time
             if elapsed >= duration:
                 break
@@ -514,7 +668,8 @@ class ActionDriver:
         start_time = time.perf_counter()
         for i in range(1, steps + 1):
             # 计算每步应移动的真实增量，避免浮点数截断导致的误差累积
-            if self._is_stopped(): break
+            if self._is_stopped():
+                break
             move_x = int(step_dx * i) - int(step_dx * (i - 1))
             move_y = int(step_dy * i) - int(step_dy * (i - 1))
 
@@ -535,10 +690,11 @@ class ActionDriver:
         if x is not None and y is not None:
             self.mouse_move(x, y, 0.5)
 
-        time.sleep(0) 
+        time.sleep(0)
 
         for i in range(repeat):
-            if self._is_stopped(): break
+            if self._is_stopped():
+                break
             if self.use_driver:
                 btn_code = lgdriver.MouseButton.LEFT
                 if button == "right":
@@ -598,7 +754,8 @@ class ActionDriver:
             return
 
         for i in range(repeat):
-            if self._is_stopped(): break
+            if self._is_stopped():
+                break
             if self.use_driver:
                 # 硬件模式：将按键名映射为 HID 码后发送
                 hid_codes, unsupported_keys = Utils.map_key_names(keys_to_press, lgdriver.KEY_MAP)

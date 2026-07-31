@@ -11,6 +11,7 @@ from config import global_config
 
 class ExecutionEvent:
     """执行事件类型常量，用于日志和事件通知"""
+
     STEP_START = "STEP_START"
     DEBUG = "DEBUG"
     INFO = "INFO"
@@ -29,11 +30,11 @@ class ScriptExecutor:
         # 根据配置决定是否使用硬件模拟输入
         use_hw_setting = global_config.get_app_setting("use_hardware", True)
         self.action = ActionDriver(use_hardware=use_hw_setting)
-        self._hold_links = {} # 跟踪 start 和 end 节点的配对状态
-        self.check_stop_func = None       # 外部停止检查回调
-        self.context_provider = None       # 上下文信息提供回调（如循环信息）
+        self._hold_links = {}  # 跟踪 start 和 end 节点的配对状态
+        self.check_stop_func = None  # 外部停止检查回调
+        self.context_provider = None  # 上下文信息提供回调（如循环信息）
         self.current_step_desc = "初始化..."
-        self.event_listener = None         # 事件监听回调
+        self.event_listener = None  # 事件监听回调
 
     def set_stop_check(self, func):
         """设置停止检查函数"""
@@ -78,29 +79,32 @@ class ScriptExecutor:
         if wait_time > 0.5:
             self._emit(ExecutionEvent.DEBUG, f"操作后随机等待: {wait_time:.3f}s")
         if wait_time > 0:
-            time.sleep(wait_time)
+            self._countdown_wait(wait_time, "延时等待")
 
-    def _countdown_wait(self, final_time, action_desc="操作"):
-        """长按操作的剩余时间计时"""
-        if final_time > 1.0:
-            start_time = time.time()
-            last_reported_sec = -1
-            while True:
-                if self._is_stopped():
-                    self._emit(ExecutionEvent.WARNING, f"{action_desc}被中止")
-                    return False
-                elapsed = time.time() - start_time
-                remaining = final_time - elapsed
-                if remaining <= 0:
-                    break
+    def _countdown_wait(self, wait_time, action_desc="操作"):
+        """当前执行操作的剩余持续时间计时"""
+        if wait_time <= 0:
+            return True
+
+        start_time = time.perf_counter()
+        deadline = start_time + wait_time
+        last_reported_sec = -1
+
+        while time.perf_counter() < deadline:
+            if self._is_stopped():
+                self._emit(ExecutionEvent.WARNING, f"{action_desc}被中止")
+                return False
+
+            remaining = deadline - time.perf_counter()
+            if remaining <= 0:
+                break
+            if wait_time > 1.0:
                 current_rem_sec = int(remaining)
                 if current_rem_sec != last_reported_sec and current_rem_sec > 0:
                     self._emit(ExecutionEvent.RESULT, f"还需{action_desc} {current_rem_sec} 秒")
                     last_reported_sec = current_rem_sec
-                time.sleep(min(0.1, remaining))
-        else:
-            if final_time > 0:
-                time.sleep(final_time)
+            sleep_time = max(0.001, min(0.02, (remaining) / 2))
+            time.sleep(sleep_time)
         return True
 
     def _smart_move(self, tx, ty, enable_move=True, min_ms=200, max_ms=800):
@@ -160,8 +164,9 @@ class ScriptExecutor:
 
     # ==================== 鼠标移动 ====================
 
-
-    def exec_mouse_move(self, x, y, random_range=0, move_enable=True, move_time_min=200, move_time_max=800, wait_min=50, wait_max=200):
+    def exec_mouse_move(
+        self, x, y, random_range=0, move_enable=True, move_time_min=200, move_time_max=800, wait_min=50, wait_max=200
+    ):
         """执行鼠标移动，到指定坐标"""
         self._emit(ExecutionEvent.STEP_START, f"移动鼠标 ({x},{y})")
         tx, ty = self.target.get_fixed_coordinate(x, y, random_range)
@@ -170,7 +175,9 @@ class ScriptExecutor:
         self._emit(ExecutionEvent.RESULT, "移动完成", {"target": (tx, ty)})
         self._wait_after(wait_min, wait_max)
 
-    def exec_camera_turn(self, drag_dx, drag_dy, random_range=10, move_time_min=200, move_time_max=800, wait_min=50, wait_max=200):
+    def exec_camera_turn(
+        self, drag_dx, drag_dy, random_range=10, move_time_min=200, move_time_max=800, wait_min=50, wait_max=200
+    ):
         """执行 3D 视角转动"""
         final_dx, final_dy = Utils.get_gaussian_offset(drag_dx, drag_dy, random_range)
         duration = Utils.get_random_time(move_time_min, move_time_max)
@@ -183,8 +190,8 @@ class ScriptExecutor:
         # 旋转完视角，立刻把 Windows 隐藏的虚拟光标拉回屏幕中心
         w, h = Utils.get_screen_size()
         import ctypes
-        ctypes.windll.user32.SetCursorPos(w // 2, h // 2)
 
+        ctypes.windll.user32.SetCursorPos(w // 2, h // 2)
 
     # ==================== 点击操作 ====================
 
@@ -310,11 +317,13 @@ class ScriptExecutor:
         interval = Utils.get_random_time(interval_min, interval_max)
 
         for i in range(repeat):
-            if self._is_stopped(): break
+            if self._is_stopped():
+                break
             self.action.mouse_down(button)
             completed = self._countdown_wait(duration_s, "长按")
             self.action.mouse_up(button)
-            if not completed or self._is_stopped(): break
+            if not completed or self._is_stopped():
+                break
             if repeat > 1 and i < repeat - 1:
                 time.sleep(interval)
 
@@ -344,11 +353,13 @@ class ScriptExecutor:
         interval = Utils.get_random_time(interval_min, interval_max)
 
         for i in range(repeat):
-            if self._is_stopped(): break
+            if self._is_stopped():
+                break
             self.action.mouse_down(button)
             completed = self._countdown_wait(duration_s, "长按")
             self.action.mouse_up(button)
-            if not completed or self._is_stopped(): break
+            if not completed or self._is_stopped():
+                break
             if repeat > 1 and i < repeat - 1:
                 time.sleep(interval)
 
@@ -388,11 +399,13 @@ class ScriptExecutor:
         interval = Utils.get_random_time(interval_min, interval_max)
 
         for i in range(repeat):
-            if self._is_stopped(): break
+            if self._is_stopped():
+                break
             self.action.mouse_down(button)
             completed = self._countdown_wait(duration_s, "长按")
             self.action.mouse_up(button)
-            if not completed or self._is_stopped(): break
+            if not completed or self._is_stopped():
+                break
             if repeat > 1 and i < repeat - 1:
                 time.sleep(interval)
 
@@ -488,11 +501,13 @@ class ScriptExecutor:
         interval = Utils.get_random_time(interval_min, interval_max)
 
         for i in range(repeat):
-            if self._is_stopped(): break
+            if self._is_stopped():
+                break
             self.action.key_down(key_code)
             completed = self._countdown_wait(duration_s, "长按")
             self.action.key_up(key_code)
-            if not completed or self._is_stopped(): break
+            if not completed or self._is_stopped():
+                break
             if repeat > 1 and i < repeat - 1:
                 time.sleep(interval)
 
@@ -562,10 +577,6 @@ class ScriptExecutor:
         """跳出当前循环"""
         self._emit(ExecutionEvent.RESULT, "跳出循环")
 
-    def exec_stop_task(self):
-        """终止整个任务"""
-        self._emit(ExecutionEvent.RESULT, "任务停止")
-
     def exec_loop_start(self, count=1, link_id=None, current_loop_index=0):
         """循环开始标记"""
         self._emit(ExecutionEvent.DEBUG, f"循环开始: 第 {current_loop_index + 1}/{count} 次")
@@ -573,6 +584,18 @@ class ScriptExecutor:
     def exec_loop_end(self, link_id=None):
         """循环结束标记"""
         pass
+
+    def cleanup_all_holds(self):
+        """清理由于异常中断导致的按键残留"""
+        if self._hold_links or (hasattr(self.action, "_held_keys") and self.action._held_keys):
+            self._emit(ExecutionEvent.WARNING, "正在强制清理并复位残留的鼠标与键盘按下状态...")
+            self.action.release_all_hardware_and_software_holds()
+            self._hold_links.clear()
+
+    def exec_stop_task(self):
+        """终止整个任务"""
+        self.cleanup_all_holds()
+        self._emit(ExecutionEvent.RESULT, "任务停止")
 
     # ==================== 分组与分割线 ====================
 
@@ -587,22 +610,6 @@ class ScriptExecutor:
     def exec_separator(self, label="—— 分割线 ——"):
         """分割线标记，仅用于视觉分隔"""
         self._emit(ExecutionEvent.DEBUG, f"分割线: {label}")
-
-
-
-    # ==================== 状态保持与清理机制 ====================
-
-    def cleanup_all_holds(self):
-        """清理由于异常中断导致的按键残留"""
-        if self._hold_links or (hasattr(self.action, '_held_keys') and self.action._held_keys):
-            self._emit(ExecutionEvent.WARNING, "正在强制清理并复位残留的鼠标与键盘按下状态...")
-            self.action.release_all_hardware_and_software_holds()
-            self._hold_links.clear()
-
-    def exec_stop_task(self):
-        """覆盖原有的停止方法，注入清理逻辑"""
-        self.cleanup_all_holds()
-        self._emit(ExecutionEvent.RESULT, "任务停止")
 
     # ==================== 同步执行 (按下/抬起) ====================
 
@@ -620,8 +627,8 @@ class ScriptExecutor:
         target_btn = "left"
         if link_id and link_id in self._hold_links:
             target_btn = self._hold_links[link_id].get("val", "left")
-            del self._hold_links[link_id] 
-            
+            del self._hold_links[link_id]
+
         self._emit(ExecutionEvent.RESULT, f"抬起鼠标 [{target_btn}] 键")
         self.action.mouse_up(target_btn)
 
@@ -633,9 +640,9 @@ class ScriptExecutor:
             self._hold_links[link_id] = {"type": "key", "val": key_code}
         self._wait_after(wait_min, wait_max)
 
-    def exec_key_hold_end(self, link_id=None, **kwargs): 
+    def exec_key_hold_end(self, link_id=None, **kwargs):
         """抬起键盘按键"""
-        target_key = "" 
+        target_key = ""
         if link_id and link_id in self._hold_links:
             target_key = self._hold_links[link_id].get("val", "")
             del self._hold_links[link_id]

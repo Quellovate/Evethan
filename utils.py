@@ -216,6 +216,15 @@ class Utils:
         )
         return list(zip(path_x, path_y))
 
+    @staticmethod
+    def stochastic_round(val):
+        """依小数位作为概率对小数进行取整"""
+        int_part = int(val)
+        frac_part = abs(val - int_part)
+        if random.random() < frac_part:
+            return int_part + (1 if val > 0 else -1)
+        return int_part
+
     # ================================================================
     #  随机化 / 时间控制
     # ================================================================
@@ -245,9 +254,15 @@ class Utils:
 
     @staticmethod
     def precise_wait(target_time):
-        """等待直到 time.perf_counter() 达到 target_time（高精度忙等）"""
-        while time.perf_counter() < target_time:
-            time.sleep(0)
+        """高精度等待"""
+        while True:
+            rem = target_time - time.perf_counter()
+            if rem <= 0:
+                break
+            if rem > 0.002:
+                time.sleep(0.001)
+            else:
+                pass
 
     # ================================================================
     #  按键名称解析 / 映射
