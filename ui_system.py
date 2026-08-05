@@ -621,7 +621,7 @@ class DefaultSettingsWidget(QWidget):
 
         for key, (data_type, current_default_val) in config["params"].items():
             # 跳过内部使用的参数
-            if key in ["link_id", "collapsed", "region", "env_w", "env_h"]:
+            if key in ["link_id", "anchor_id", "collapsed", "region", "env_w", "env_h"]:
                 continue
 
             label_text = PARAM_TRANSLATIONS.get(key, f"{key}:")

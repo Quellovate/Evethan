@@ -103,12 +103,15 @@ class HistoryManager:
         self.redo_stack = deque(maxlen=max_history)  # 重做栈
         self.is_performing_undo_redo = False  # 防止在撤销/重做时再次记录快照
 
-    def create_snapshot(self, action_name="未知操作"):
+    def create_snapshot(self, action_name="未知操作", target_row=None):
         """在执行操作前创建一份当前状态的深拷贝快照"""
         if self.is_performing_undo_redo:
             return
         current_state = self.timeline.get_all_data_deep_copy()
-        focus_row = self.timeline.currentRow() if self.timeline.currentRow() != -1 else 0
+        if target_row is not None:
+            focus_row = target_row
+        else:
+            focus_row = self.timeline.currentRow() if self.timeline.currentRow() != -1 else 0
         self.undo_stack.append((current_state, action_name, focus_row))
         self.redo_stack.clear()  # 新操作后清空重做栈
         self.timeline.history_changed.emit()
@@ -235,6 +238,8 @@ class TaskDelegate(QStyledItemDelegate):
             bg_color = UIColors.BG_IF_SEL if is_highlight else UIColors.BG_IF
         elif "hold_" in cmd_type:
             bg_color = UIColors.BG_HOLD_SEL if is_highlight else UIColors.BG_HOLD
+        elif cmd_type in ["anchor", "jump"]:
+            bg_color = UIColors.BG_FLOW_SEL if is_highlight else UIColors.BG_FLOW
         else:
             bg_color = UIColors.BG_NORMAL_SEL if is_highlight else UIColors.BG_NORMAL
 
@@ -270,7 +275,8 @@ class TaskDelegate(QStyledItemDelegate):
         content_start_x = rect.left() + strip_w + (indent_level * UIDims.DELEGATE_INDENT_STEP) + 5
 
         # ---------- 分组起始行：绘制折叠按钮 + 标签 ----------
-        if cmd_type == "group_start":
+        foldable_types = ["group_start", "loop_start", "if_start"]
+        if cmd_type in foldable_types:
             is_collapsed = params.get("collapsed", False)
             btn_size = UIDims.DELEGATE_FOLD_BTN_SIZE
             btn_rect = QRect(content_start_x, rect.top() + (rect.height() - btn_size) // 2, btn_size, btn_size)
@@ -284,10 +290,10 @@ class TaskDelegate(QStyledItemDelegate):
             if is_collapsed:
                 painter.drawLine(center.x(), center.y() - 3, center.x(), center.y() + 3)
             text_x = content_start_x + btn_size + 8
-            group_label = params.get("label", "分组")
+            text = index.data(Qt.DisplayRole)
             painter.setFont(UIFonts.delegate_bold(option.font))
             text_rect = QRect(text_x, rect.top(), rect.right() - text_x, rect.height())
-            painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, f"{group_label}")
+            painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, text)
 
         # ---------- 按键类指令：绘制录制按钮和按键显示框 ----------
         elif cmd_type in ["key_press", "key_long_press", "key_hold_start"]:
@@ -380,7 +386,7 @@ class ToolboxList(QListWidget):
                 ],
             ),
             ("键盘操作", ["key_press", "key_long_press", "key_hold_start"]),
-            ("流程控制", ["wait", "find_image", "break_loop", "stop_task"]),
+            ("流程控制", ["wait", "find_image", "anchor", "jump", "break_loop", "stop_task"]),
             ("结构模块", ["loop_start", "if_start", "else_branch", "group_start", "separator"]),
         ]
         self.populate_tools()
@@ -551,6 +557,7 @@ class ScriptTimeline(QListWidget):
         """统一刷新：更新缩进缓存 → 刷新行号 → 发出结构变化信号"""
         self.update_indentation_cache()
         self.refresh_line_numbers()
+        self._apply_fold_states()
         self.structure_changed.emit()
         self.viewport().update()
 
@@ -588,26 +595,24 @@ class ScriptTimeline(QListWidget):
             item.setText(f"{prefix}{label}")
 
     def _apply_fold_states(self):
-        """根据分组的折叠状态，隐藏/显示组内子项"""
-        current_collapsed_id = None
+        """根据模块的折叠状态，隐藏/显示模块内子项"""
+        collapsed_stack = []
+
         for i in range(self.count()):
             item = self.item(i)
             data = item.data(Qt.UserRole)
             t = data.get("type", "")
-            params = data.get("params", {})
-            link_id = params.get("link_id")
-            if current_collapsed_id:
-                # 遇到对应的 group_end 时结束折叠
-                if t == "group_end" and link_id == current_collapsed_id:
-                    item.setHidden(False)
-                    current_collapsed_id = None
-                else:
-                    item.setHidden(True)
-            elif t == "group_start" and params.get("collapsed", False):
-                current_collapsed_id = link_id
-                item.setHidden(False)
-            else:
-                item.setHidden(False)
+            link_id = data.get("params", {}).get("link_id")
+
+            if t.endswith("_end") and collapsed_stack and collapsed_stack[-1] == link_id:
+                collapsed_stack.pop()
+
+            is_hidden = len(collapsed_stack) > 0
+            item.setHidden(is_hidden)
+
+            if t in ["group_start", "loop_start", "if_start"]:
+                if data.get("params", {}).get("collapsed", False):
+                    collapsed_stack.append(link_id)
 
     # -------------------- 数据加载/重建 --------------------
 
@@ -731,7 +736,7 @@ class ScriptTimeline(QListWidget):
         """录制完成后更新按键值"""
         row = self.row(item) + 1
         name = self._get_item_desc(item)
-        self.history_mgr.create_snapshot(f"修改第 {row} 行 [{name}] 的按键为 '{code_str}'")
+        self.history_mgr.create_snapshot(f"修改第 {row} 行 [{name}] 的按键为 '{code_str}'", target_row=row - 1)
         data = item.data(Qt.UserRole)
         data["params"]["key_code"] = code_str
         item.setData(Qt.UserRole, data)
@@ -757,10 +762,11 @@ class ScriptTimeline(QListWidget):
         content_start_x = rect.left() + strip_w + (indent * indent_step) + 5
 
         # 点击分组折叠按钮
-        if data.get("type") == "group_start":
+        foldable_types = ["group_start", "loop_start", "if_start"]
+        if data.get("type") in foldable_types:
             fold_btn_size = UIDims.DELEGATE_FOLD_BTN_SIZE
             if content_start_x <= x <= content_start_x + fold_btn_size:
-                self.toggle_group_fold(item)
+                self.toggle_fold(item)
                 return
 
         # 点击按键录制按钮
@@ -909,30 +915,29 @@ class ScriptTimeline(QListWidget):
 
     # -------------------- 分组折叠 --------------------
 
-    def toggle_group_fold(self, item):
-        """切换分组的折叠/展开状态，并记录快照"""
+    def toggle_fold(self, item):
+        """切换模块的折叠/展开状态，并记录快照"""
         data = item.data(Qt.UserRole)
-        if data.get("type") != "group_start":
+        t = data.get("type")
+        if t not in ["group_start", "loop_start", "if_start"]:
             return
+
         is_collapsed = not data["params"].get("collapsed", False)
-        action_name = "折叠分组" if is_collapsed else "展开分组"
+
+        name_map = {"group_start": "分组", "loop_start": "循环", "if_start": "判断"}
+        module_name = name_map.get(t, "模块")
+        action_name = f"折叠{module_name}" if is_collapsed else f"展开{module_name}"
+
         self.history_mgr.create_snapshot(action_name)
 
         data["params"]["collapsed"] = is_collapsed
         item.setData(Qt.UserRole, data)
-        link_id = data["params"]["link_id"]
-        start_row = self.row(item)
-        # 找到对应的 group_end
-        end_row = -1
-        for i in range(start_row + 1, self.count()):
-            d = self.item(i).data(Qt.UserRole)
-            if d.get("params", {}).get("link_id") == link_id and d.get("type") == "group_end":
-                end_row = i
-                break
-        if end_row != -1:
-            for i in range(start_row + 1, end_row):
-                self.item(i).setHidden(is_collapsed)
+
+        self._apply_fold_states()
+        self.setCurrentItem(item)
+        self.on_item_clicked(item)
         self.viewport().update()
+
         if hasattr(self, "property_panel") and self.property_panel:
             self.property_panel.data_changed.emit()
 
@@ -1068,7 +1073,7 @@ class ScriptTimeline(QListWidget):
             final_display_row = insert_idx_0based if src_row <= insert_idx_0based else insert_idx_0based + 1
             name = self._get_item_desc(self._dragged_items[0])
             msg = f"移动第 {src_row} 行的 [{name}] 到第 {final_display_row} 行"
-        self.history_mgr.create_snapshot(msg)
+        self.history_mgr.create_snapshot(msg, target_row=insert_idx_0based)
 
         mime_text = event.mimeData().text()
         self.drop_indicator_row = -1
@@ -1137,6 +1142,8 @@ class ScriptTimeline(QListWidget):
         data = {"type": cmd_type, "desc": config["label"], "params": {}, "checked": False}
         for k, v in config["params"].items():
             data["params"][k] = v[1]
+        if cmd_type == "anchor":
+            data["params"]["anchor_id"] = str(uuid.uuid4())[:8]
         return data
 
     def _create_paired_data(self, mode):
@@ -1195,7 +1202,9 @@ class ScriptTimeline(QListWidget):
             return
         target_row = current_row + direction
         name = self._get_item_desc(self.item(current_row))
-        self.history_mgr.create_snapshot(f"{'上移' if direction == -1 else '下移'}了第 {current_row + 1} 行的 [{name}]")
+        self.history_mgr.create_snapshot(
+            f"{'上移' if direction == -1 else '下移'}了第 {current_row + 1} 行的 [{name}]", target_row=target_row
+        )
         self.insertItem(target_row, self.takeItem(current_row))
         self.setCurrentRow(target_row)
         self.refresh_ui()
@@ -1272,7 +1281,9 @@ class ScriptTimeline(QListWidget):
         min_affected_row = min([self.row(it) for it in items_to_delete])  # 受操作的最上方指令行序号
         rows = sorted([self.row(it) + 1 for it in items_to_delete])
         if len(rows) == 1:
-            self.history_mgr.create_snapshot(f"删除第 {rows[0]} 行的 [{self._get_item_desc(items_to_delete[0])}]")
+            self.history_mgr.create_snapshot(
+                f"删除第 {rows[0]} 行的 [{self._get_item_desc(items_to_delete[0])}]", target_row=min_affected_row
+            )
         else:
             row_str = ",".join(map(str, rows[:4])) + ("..." if len(rows) > 4 else "")
             self.history_mgr.create_snapshot(f"批量删除 {len(rows)} 个指令 (行: {row_str})")
@@ -1300,7 +1311,7 @@ class ScriptTimeline(QListWidget):
             data_list = json.loads(QApplication.clipboard().text())
             if not isinstance(data_list, list):
                 return
-            self.history_mgr.create_snapshot(f"在第 {target_row} 行粘贴 {len(data_list)} 个指令")
+            self.history_mgr.create_snapshot(f"在第 {target_row} 行粘贴 {len(data_list)} 个指令", target_row=target_row)
         except:
             return
         # 为粘贴的成对结构生成新的 link_id，避免与已有项冲突
@@ -1528,11 +1539,56 @@ class PropertyEditor(QWidget):
                 self.layout.addRow(label_text, container)
                 continue
 
+            # --- 跳转目标锚点控件 ---
+            if key == "target_id":
+                widget = QComboBox()
+                widget.setEditable(True)
+                # 提取当前指令参数已保存的 ID
+                raw_id = str(val).split()[0] if str(val).strip() else ""
+                display_text = str(val)
+
+                # 获取任务中已有的所有锚点信息
+                anchor_options = []
+                if self.current_item and self.current_item.listWidget():
+                    all_data = self.current_item.listWidget().get_all_data()
+                    for i, step in enumerate(all_data):
+                        if step.get("type") == "anchor":
+                            a_id = step.get("params", {}).get("anchor_id", "")
+                            a_desc = step.get("desc", "")
+                            if a_id:
+                                rich_text = f"{a_id}  [行{i + 1}] {a_desc}"
+                                anchor_options.append(rich_text)
+                                if a_id == raw_id:
+                                    display_text = rich_text
+
+                # 如果锚点的位置或备注发生过改动，自动更新跳转指令的底层数据
+                if display_text != str(val):
+                    self.current_data["params"][key] = display_text
+                    if self.current_item:
+                        self.current_item.setData(Qt.UserRole, self.current_data)
+
+                widget.addItems(anchor_options)
+                widget.setCurrentText(str(val))
+
+                if not preview_mode:
+                    widget.lineEdit().editingFinished.connect(
+                        lambda w=widget, k=key: self._handle_target_id_input(w, k)
+                    )
+                    widget.activated.connect(lambda idx, k=key: self.update_param_from_widget(k))
+                else:
+                    widget.setEnabled(False)
+
+                self.active_widgets[key] = widget
+                self.layout.addRow(label_text, widget)
+                continue
+
             # --- 通用控件（由工厂创建） ---
             finish_cb = None if preview_mode else lambda v=None, k=key: self.update_param_from_widget(k)
             widget = WidgetFactory.create_input_widget(data_type, val, finish_callback=finish_cb)
             if widget:
                 self.active_widgets[key] = widget
+                if key == "anchor_id" and isinstance(widget, QLineEdit):
+                    widget.setReadOnly(True)
 
                 # 按键录制控件：附带录制按钮
                 if key == "key_code":
@@ -1604,6 +1660,26 @@ class PropertyEditor(QWidget):
         """按键录制完成回调"""
         line_edit.setText(key_str)
         self.update_param_from_widget("key_code")
+
+    # -------------------- 锚点 ID 填充 --------------------
+    def _handle_target_id_input(self, widget, key):
+        """查找当前任务中是否存在该 ID ，自动补全备注"""
+        text = widget.currentText().strip()
+        if text:
+            input_id = text.split()[0]
+            if self.current_item and self.current_item.listWidget():
+                all_data = self.current_item.listWidget().get_all_data()
+                for i, step in enumerate(all_data):
+                    if step.get("type") == "anchor":
+                        a_id = step.get("params", {}).get("anchor_id", "")
+                        if a_id == input_id:
+                            a_desc = step.get("desc", "")
+                            new_text = f"{a_id}  [行{i + 1}] {a_desc}"
+                            widget.blockSignals(True)
+                            widget.setCurrentText(new_text)
+                            widget.blockSignals(False)
+                            break
+        self.update_param_from_widget(key)
 
     # -------------------- 区域选择 --------------------
 

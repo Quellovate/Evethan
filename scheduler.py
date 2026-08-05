@@ -38,6 +38,8 @@ class TaskScheduler:
             "if_start": self.executor.exec_if_start,
             "else_branch": self.executor.exec_else_branch,
             "if_end": self.executor.exec_if_end,
+            "anchor": self.executor.exec_anchor,
+            "jump": self.executor.exec_jump,
             "break_loop": self.executor.exec_break,
             "stop_task": self.executor.exec_stop_task,
             "mouse_hold_start": self.executor.exec_mouse_hold_start,
@@ -277,6 +279,34 @@ class TaskScheduler:
                             index = end_index + 1
                         else:
                             self._emit(ExecutionEvent.ERROR, "结构错误：Else 后找不到 if_end")
+                            index += 1
+
+                    # ── 锚点 ──
+                    elif cmd_type == "anchor":
+                        self.executor.exec_anchor(**params)
+                        index += 1
+
+                    # ── 跳转指令 ──
+                    elif cmd_type == "jump":
+                        target_raw = params.get("target_id", "")
+                        target = target_raw.split()[0] if target_raw else ""
+                        self.executor.exec_jump(target)
+
+                        found_idx = -1
+                        # 寻找目标锚点
+                        for i, step in enumerate(task_list):
+                            if step.get("type") == "anchor":
+                                p = step.get("params", {})
+                                if p.get("anchor_id") == target:
+                                    found_idx = i
+                                    break
+
+                        if found_idx != -1:
+                            self._emit(ExecutionEvent.INFO, f"跳转成功，前往第 {found_idx + 1} 行")
+                            index = found_idx
+                            continue
+                        else:
+                            self._emit(ExecutionEvent.WARNING, f"跳转失败：未找到目标 '{target}'")
                             index += 1
 
                     # ── 跳出循环 (break) ──

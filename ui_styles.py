@@ -165,6 +165,8 @@ class UIColors:
     SEPARATOR_LINE = QColor(Semantic.AUX_LIGHT_BORDER)
     BG_HOLD = QColor(Semantic.AUX_LIGHT_BG)
     BG_HOLD_SEL = QColor(Semantic.AUX_LIGHT_BORDER)
+    BG_FLOW = QColor(Semantic.DANGER_LIGHT_BG)
+    BG_FLOW_SEL = QColor(Semantic.DANGER_LIGHT_BORDER)
 
     # --- 折叠按钮 ---
     FOLD_BTN_BORDER = QColor(Semantic.TEXT_SECONDARY)
@@ -867,11 +869,13 @@ class UIStyles:
         }}
     """
 
-    # 缩略图丢失错误文本 
+    # 缩略图丢失错误文本
     REPLACE_THUMBNAIL_ERROR = f"color: {S.DANGER_BG}; font-weight: bold; background-color: transparent;"
 
     # 卡片内部信息文本
-    REPLACE_LBL_NAME = f"border: none; font-size: 16px; font-weight: bold; color: {S.TEXT_PRIMARY}; background: transparent;"
+    REPLACE_LBL_NAME = (
+        f"border: none; font-size: 16px; font-weight: bold; color: {S.TEXT_PRIMARY}; background: transparent;"
+    )
     REPLACE_LBL_RES = f"border: none; font-size: 16px; color: {S.TEXT_PRIMARY}; background: transparent;"
     REPLACE_LBL_REFS = f"border: none; font-size: 16px; color: {S.TEXT_PRIMARY}; background: transparent;"
 
@@ -896,6 +900,9 @@ class UIStyles:
         QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}
     """
     BTN_REPLACE_ACTION = _btn_factory(
-        S.WARNING_LIGHT_BG, S.WARNING_LIGHT_TEXT, S.WARNING_LIGHT_BORDER, S.WARNING_HOVER, 
-        "padding: 2px 12px; border-radius: 6px; font-size: 18px; font-weight: bold;"
+        S.WARNING_LIGHT_BG,
+        S.WARNING_LIGHT_TEXT,
+        S.WARNING_LIGHT_BORDER,
+        S.WARNING_HOVER,
+        "padding: 2px 12px; border-radius: 6px; font-size: 18px; font-weight: bold;",
     )

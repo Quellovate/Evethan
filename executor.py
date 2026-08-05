@@ -541,7 +541,9 @@ class ScriptExecutor:
 
     # ==================== 条件判断（If/Else/End） ====================
 
-    def exec_if_start(self, image_path, confidence=0.7, timeout=5.0, link_id=None, region=None, env_w=0, env_h=0):
+    def exec_if_start(
+        self, image_path, confidence=0.7, timeout=5.0, link_id=None, region=None, env_w=0, env_h=0, **kwargs
+    ):
         """条件判断：在超时时间内查找图片，找到返回True，否则False"""
         img_name = os.path.basename(image_path)
         region_str = (
@@ -577,13 +579,22 @@ class ScriptExecutor:
         """跳出当前循环"""
         self._emit(ExecutionEvent.RESULT, "跳出循环")
 
-    def exec_loop_start(self, count=1, link_id=None, current_loop_index=0):
+    def exec_loop_start(self, count=1, link_id=None, current_loop_index=0, **kwargs):
         """循环开始标记"""
         self._emit(ExecutionEvent.DEBUG, f"循环开始: 第 {current_loop_index + 1}/{count} 次")
 
     def exec_loop_end(self, link_id=None):
         """循环结束标记"""
         pass
+
+    def exec_anchor(self, anchor_id="", wait_min=50, wait_max=100):
+        """锚点标记"""
+        self._emit(ExecutionEvent.DEBUG, f"经过锚点: {anchor_id}")
+        self._wait_after(wait_min, wait_max)
+
+    def exec_jump(self, target_id=""):
+        """跳转至锚点"""
+        self._emit(ExecutionEvent.INFO, f"将跳转至锚点: {target_id}")
 
     def cleanup_all_holds(self):
         """清理由于异常中断导致的按键残留"""

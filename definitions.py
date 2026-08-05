@@ -294,7 +294,7 @@ FACTORY_CONFIG = {
     "loop_start": {
         "label": "🔁 For 循环开始",
         "desc": "设定循环次数",
-        "params": {"count": (int, 5), "link_id": (str, "")},  # link_id 用于配对循环结束
+        "params": {"count": (int, 5), "link_id": (str, ""), "collapsed": (bool, False)},  # link_id 用于配对循环结束
     },
     "loop_end": {"label": "🔁 循环结束", "desc": "循环回跳点", "params": {"link_id": (str, "")}},
     "if_start": {
@@ -308,6 +308,7 @@ FACTORY_CONFIG = {
             "link_id": (str, ""),
             "env_w": (int, 0),
             "env_h": (int, 0),
+            "collapsed": (bool, False),
         },
     },
     "else_branch": {
@@ -316,6 +317,12 @@ FACTORY_CONFIG = {
         "params": {"link_id": (str, "")},
     },
     "if_end": {"label": "🔀 判断结束", "desc": "逻辑分支结束点", "params": {"link_id": (str, "")}},
+    "anchor": {
+        "label": "📌 锚点",
+        "desc": "设置可供跳转的锚点位置",
+        "params": {"anchor_id": (str, ""), "wait_min": (int, 50), "wait_max": (int, 100)},
+    },
+    "jump": {"label": "🚀 跳转至锚点", "desc": "跳转到指定的锚点位置", "params": {"target_id": (str, "")}},
     # ---- 分组 / 分割线 ----
     "group_start": {
         "label": "📂 任务分组",
@@ -362,6 +369,8 @@ PARAM_TRANSLATIONS = {
     "timeout": "超时时间 (秒)",
     "label": "分组名称",
     "collapsed": "默认折叠状态",
+    "anchor_id": "当前锚点 ID",
+    "target_id": "目标锚点 ID",
 }
 
 # ============================================================
