@@ -122,11 +122,10 @@ class HistoryManager:
             return
         self.is_performing_undo_redo = True
         try:
-            curr_row = self.timeline.currentRow()
             curr_scroll = self.timeline.verticalScrollBar().value()
             current_state = self.timeline.get_all_data_deep_copy()
             prev_state_data, action_name, focus_row = self.undo_stack.pop()
-            self.redo_stack.append((current_state, action_name, curr_row))
+            self.redo_stack.append((current_state, action_name, focus_row))
             self.timeline.load_from_data(prev_state_data)
             if focus_row != -1 and focus_row < self.timeline.count():
                 self.timeline.setCurrentRow(focus_row)
@@ -143,11 +142,10 @@ class HistoryManager:
             return
         self.is_performing_undo_redo = True
         try:
-            curr_row = self.timeline.currentRow()
             curr_scroll = self.timeline.verticalScrollBar().value()
             current_state = self.timeline.get_all_data_deep_copy()
             next_state_data, action_name, focus_row = self.redo_stack.pop()
-            self.undo_stack.append((current_state, action_name, curr_row))
+            self.undo_stack.append((current_state, action_name, focus_row))
             self.timeline.load_from_data(next_state_data)
             if focus_row != -1 and focus_row < self.timeline.count():
                 self.timeline.setCurrentRow(focus_row)
@@ -164,7 +162,7 @@ class HistoryManager:
         redo_text = self.redo_stack[-1][1] if self.redo_stack else "无"
         return undo_text, redo_text
 
-
+ 
 # ============================================================
 #  自定义绘制委托：控制任务编排列表中每一行的绘制方式
 # ============================================================
@@ -174,6 +172,7 @@ class TaskDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index):
         painter.save()
         item_data = index.data(Qt.UserRole)
+        error_msg = item_data.get("_error", "")
         is_checked = item_data.get("checked", False)
         cmd_type = item_data.get("type", "")
         params = item_data.get("params", {})
@@ -246,7 +245,6 @@ class TaskDelegate(QStyledItemDelegate):
         painter.fillRect(main_body_rect, bg_color)
 
         # ---------- 绘制缩进引导线（虚线 & 实线） ----------
-
         list_widget = option.widget
         active_pair = getattr(list_widget, "active_pair_info", None)
         current_row = index.row()
@@ -351,6 +349,21 @@ class TaskDelegate(QStyledItemDelegate):
                 painter.drawLine(rect.topLeft(), rect.topRight())
             elif drop_row == option.widget.count() and current_row == option.widget.count() - 1:
                 painter.drawLine(rect.bottomLeft(), rect.bottomRight())
+
+        # ---------- 软校验错误提示 ----------
+        if error_msg:
+            warning_rect = QRect(rect.right() - 35, rect.top(), 30, rect.height())
+            painter.drawText(warning_rect, Qt.AlignCenter, "⚠️")
+
+            list_widget = option.widget
+            item = list_widget.item(index.row())
+            if item and item.toolTip() != error_msg:
+                item.setToolTip(error_msg)
+        else:
+            list_widget = option.widget
+            item = list_widget.item(index.row())
+            if item and item.toolTip():
+                item.setToolTip("")
 
         painter.restore()
 
@@ -558,6 +571,7 @@ class ScriptTimeline(QListWidget):
         self.update_indentation_cache()
         self.refresh_line_numbers()
         self._apply_fold_states()
+        self._soft_validate_structure()
         self.structure_changed.emit()
         self.viewport().update()
 
@@ -1117,14 +1131,6 @@ class ScriptTimeline(QListWidget):
         for i, new_data in enumerate(items_to_insert):
             simulated_list.insert(target_row + i, new_data)
 
-        # 验证结构合法性
-        valid, msg_err = self._validate_and_fix_structure(simulated_list)
-        if not valid:
-            QMessageBox.warning(self, "非法操作", msg_err)
-            event.ignore()
-            self.viewport().update()
-            return
-
         event.accept()
         self.refresh_with_data(simulated_list)
         self._dragged_items = []
@@ -1157,36 +1163,62 @@ class ScriptTimeline(QListWidget):
 
     # -------------------- 结构验证 --------------------
 
-    def _validate_and_fix_structure(self, data_list):
-        """验证指令列表的结构合法性（嵌套是否正确、分组是否闭合等）"""
+    def _soft_validate_structure(self):
+        """软校验：检查指令列表的结构合法性（嵌套是否正确、分组是否闭合等）"""
         stack = []
-        for item in data_list:
-            t = item.get("type", "")
-            params = item.get("params", {})
-            link_id = params.get("link_id", "")
+
+        # 清空所有历史错误标记
+        for i in range(self.count()):
+            item = self.item(i)
+            data = item.data(Qt.UserRole)
+            if "_error" in data:
+                del data["_error"]
+                item.setData(Qt.UserRole, data)
+
+        # 检查指令结构
+        for i in range(self.count()):
+            item = self.item(i)
+            data = item.data(Qt.UserRole)
+            t = data.get("type", "")
+            link_id = data.get("params", {}).get("link_id", "")
 
             if "start" in t and link_id:
-                stack.append((t, link_id))
+                stack.append({"type": t, "id": link_id, "row": i, "item": item})
+
             elif "end" in t and link_id:
-                if not stack:
-                    return False, f"存在孤立的结束标记 ({t})！"
-                parent_type, parent_id = stack[-1]
-                if parent_id != link_id:
-                    return False, "结构错误：存在交叉嵌套！"
-                if parent_type != t.replace("_end", "_start"):
-                    return False, f"结构错误：{t} 试图闭合 {parent_type}！"
-                stack.pop()
+                # 寻找匹配的开始标记
+                found_idx = -1
+                for j in range(len(stack) - 1, -1, -1):
+                    if stack[j]["id"] == link_id:
+                        found_idx = j
+                        break
+
+                if found_idx != -1:
+                    if found_idx != len(stack) - 1:
+                        self._mark_error(item, "结构错误：存在交叉嵌套！")
+                        for k in range(found_idx + 1, len(stack)):
+                            self._mark_error(stack[k]["item"], "结构错误：存在交叉嵌套！")
+                    stack = stack[:found_idx]
+                else:
+                    self._mark_error(item, "结构不完整：存在孤立的结束标记！")
+
             elif t == "else_branch":
-                if not stack:
-                    return False, "孤立的【否则(Else)】：必须放在【判断(If)】内部！"
-                parent_type, parent_id = stack[-1]
-                if parent_type != "if_start":
-                    return False, "位置错误：【否则(Else)】只能直接位于【判断(If)】层级下！"
-                if link_id != parent_id:
-                    params["link_id"] = parent_id  # 自动修正 link_id
-        if stack:
-            return False, "结构不完整：存在未闭合的开始标记！"
-        return True, "OK"
+                if not stack or stack[-1]["type"] != "if_start":
+                    self._mark_error(item, "结构错误：Else 必须放在 If 模块内部！")
+                elif stack[-1]["id"] != link_id:
+                    data["params"]["link_id"] = stack[-1]["id"]
+                    item.setData(Qt.UserRole, data)
+
+        for s in stack:
+            data = s["item"].data(Qt.UserRole)
+            if "_error" not in data:
+                self._mark_error(s["item"], "结构不完整：存在孤立的开始标记！")
+
+    def _mark_error(self, item, error_msg):
+        """写入错误信息"""
+        data = item.data(Qt.UserRole)
+        data["_error"] = error_msg
+        item.setData(Qt.UserRole, data)
 
     # -------------------- 移动指令 --------------------
 
@@ -1208,7 +1240,7 @@ class ScriptTimeline(QListWidget):
         self.insertItem(target_row, self.takeItem(current_row))
         self.setCurrentRow(target_row)
         self.refresh_ui()
-        self._validate_and_fix_structure(self.get_all_data())
+        self._soft_validate_structure(self.get_all_data())
         self._scroll_to(target_row, orig_scroll)
 
     # -------------------- 键盘快捷键 --------------------
@@ -1326,10 +1358,7 @@ class ScriptTimeline(QListWidget):
         simulated_list = [self.item(i).data(Qt.UserRole) for i in range(self.count())]
         for i, new_data in enumerate(data_list):
             simulated_list.insert(target_row + i if self.currentRow() != -1 else self.count() + i, new_data)
-        valid, msg = self._validate_and_fix_structure(simulated_list)
-        if not valid:
-            QMessageBox.warning(self, "无法粘贴", f"粘贴后会导致结构错误：\n{msg}")
-            return
+
         self.refresh_with_data(simulated_list)
         self._scroll_to(target_row, orig_scroll)
 
@@ -1817,8 +1846,11 @@ class PropertyEditor(QWidget):
             new_val = widget.currentText()
         if new_val is not None and self.current_data["params"].get(key) != new_val:
             if self.history_callback:
+                row_idx = self._get_current_row_idx()
+                target_row_0based = (row_idx - 1) if isinstance(row_idx, int) else None
                 self.history_callback(
-                    f"修改第 {self._get_current_row_idx()} 行: {PARAM_TRANSLATIONS.get(key, key)} -> {new_val}"
+                    f"修改第 {self._get_current_row_idx()} 行: {PARAM_TRANSLATIONS.get(key, key)} -> {new_val}",
+                    target_row=target_row_0based,
                 )
             self.current_data["params"][key] = new_val
             self.current_item.setData(Qt.UserRole, self.current_data)

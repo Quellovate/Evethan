@@ -1543,7 +1543,9 @@ class MainWindow(QMainWindow):
         self.global_tool.show()
 
     def show_global_rule_result(self, x, y, dx, dy):
-        QMessageBox.information(self, "测距结果", f"终点坐标: ({x}, {y})\n相对偏移: dx={dx}, dy={dy}")
+        QMessageBox.information(
+            self, "测距结果", f"起点坐标: ({x - dx}, {y - dy})\n终点坐标: ({x}, {y})\n相对偏移: dx={dx}, dy={dy}"
+        )
 
     # ----- 标签页切换 -----
 
