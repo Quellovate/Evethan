@@ -49,6 +49,12 @@ class Palette:
     PURPLE_500 = "#A855F7"
     PURPLE_700 = "#7E22CE"
     PURPLE_900 = "#581C87"
+    # 青色系列
+    TEAL_100 = "#F0FDFA"
+    TEAL_300 = "#99F6E4"
+    TEAL_500 = "#14B8A6"
+    TEAL_700 = "#0F766E"
+    TEAL_900 = "#134E4A"
 
 
 # ═══════════════════════════════════════════════════════════
@@ -124,6 +130,16 @@ class Semantic:
     AUX_LIGHT_TEXT = Palette.PURPLE_700
     AUX_DARK_TEXT = Palette.PURPLE_900
 
+    # --- 特殊色（青） ---
+    INFO_BG = Palette.TEAL_500
+    INFO_HOVER = Palette.TEAL_300
+    INFO_PRESSED = Palette.TEAL_700
+    INFO_TEXT = Palette.WHITE
+    INFO_LIGHT_BG = Palette.TEAL_100
+    INFO_LIGHT_BORDER = Palette.TEAL_300
+    INFO_LIGHT_TEXT = Palette.TEAL_700
+    INFO_DARK_TEXT = Palette.TEAL_900
+
 
 # ═══════════════════════════════════════════════════════════
 # QColor 实例 —— 供绘制代码直接使用的颜色对象
@@ -160,6 +176,8 @@ class UIColors:
     BG_GROUP_SEL = QColor(Semantic.SUCCESS_LIGHT_BORDER)
     BG_IF = QColor(Semantic.PRIMARY_LIGHT_BG)
     BG_IF_SEL = QColor(Semantic.PRIMARY_LIGHT_BORDER)
+    BG_SUBTASK = QColor(Semantic.INFO_LIGHT_BG)
+    BG_SUBTASK_SEL = QColor(Semantic.INFO_LIGHT_BORDER)
     SEPARATOR_BG = QColor(Semantic.AUX_LIGHT_BG)
     SEPARATOR_TEXT = QColor(Semantic.AUX_LIGHT_TEXT)
     SEPARATOR_LINE = QColor(Semantic.AUX_LIGHT_BORDER)
@@ -197,6 +215,7 @@ class UIColors:
     TOOLBOX_ITEM_MOUSE = QColor(Semantic.WARNING_LIGHT_BG)
     TOOLBOX_ITEM_KEYBOARD = QColor(Semantic.SUCCESS_LIGHT_BG)
     TOOLBOX_ITEM_CONTROL = QColor(Semantic.DANGER_LIGHT_BG)
+    TOOLBOX_ITEM_SUBTASK = QColor(Semantic.INFO_LIGHT_BG)
     TOOLBOX_HEADER_MOUSE_BG = QColor(Semantic.WARNING_LIGHT_BORDER)
     TOOLBOX_HEADER_MOUSE_TEXT = QColor(Semantic.WARNING_LIGHT_TEXT)
     TOOLBOX_HEADER_KEYBOARD_BG = QColor(Semantic.SUCCESS_LIGHT_BORDER)
@@ -733,6 +752,11 @@ class UIStyles:
 
     READONLY_INPUT = _input_factory(S.BG_SURFACE_ALT, S.TEXT_SECONDARY, S.BORDER_DEFAULT, "font-size: 14px;")
 
+    COMBOBOX_EDITABLE = (
+        "QComboBox { padding: 4px 26px 4px 6px; min-height: 0px; font-size: 14pt; } "
+        "QComboBox QLineEdit { padding: 2px 0px; margin: 0px; border: none; background: transparent; }"
+    )
+
     SETTINGS_KEY_INPUT_READONLY = (
         f"QLineEdit {{ background-color: transparent; color: {S.TEXT_PRIMARY}; "
         f"border: none; font-size: 20px; font-weight: bold; }}"
@@ -793,8 +817,8 @@ class UIStyles:
     PANEL_MANAGE = _groupbox_factory(_MANAGE_BG, _MANAGE_BD, _MANAGE_TT, inner_bg=S.BG_SURFACE)  # 管理区
     PANEL_EDITOR = _groupbox_factory(_EDITOR_BG, _EDITOR_BD, _EDITOR_TT, inner_bg=S.BG_SURFACE)  # 编辑区
 
-    # 编辑器右侧标签页
-    PANEL_EDITOR_RIGHT_TABS = f"""
+    # 编辑器标签页
+    PANEL_EDITOR_TABS = f"""
         QTabWidget::pane {{
             background-color: transparent; border: none;
         }}

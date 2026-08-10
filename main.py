@@ -77,6 +77,7 @@ try:
     from ui_components import (
         TaskDelegate,
         ToolboxList,
+        SubtaskList,
         ScriptTimeline,
         PropertyEditor,
         TaskReadmeWidget,
@@ -457,18 +458,27 @@ class TaskEditorWidget(QWidget):
         # --- 三栏分割器 ---
         splitter = QSplitter(Qt.Horizontal)
 
-        # 左侧：工具箱
+        # 左侧：工具箱 & 子任务列表
         self.toolbox = ToolboxList(enable_drag=True)
-        left_box = QGroupBox("工具箱")
-        left_box.setStyleSheet(UIStyles.PANEL_EDITOR)
+        self.subtask_list = SubtaskList(self.task_manager)
+        left_box = QGroupBox("")
+        custom_left_style = UIStyles.PANEL_EDITOR.replace(
+            "padding: 48px 12px 12px 12px;", "padding: 0px 12px 12px 12px;"
+        )
+        left_box.setStyleSheet(custom_left_style)
         left_layout = QVBoxLayout(left_box)
-        left_layout.setContentsMargins(5, 5, 5, 5)
-        left_layout.setSpacing(5)
-        left_layout.addWidget(self.toolbox)
+        left_layout.setContentsMargins(5, 0, 5, 5)
+
+        self.left_tabs = QTabWidget()
+        self.left_tabs.setStyleSheet(UIStyles.PANEL_EDITOR_TABS)
+        self.left_tabs.addTab(self.toolbox, "工具箱")
+        self.left_tabs.addTab(self.subtask_list, "子任务")
+
+        left_layout.addWidget(self.left_tabs)
 
         # 中间：任务编排
         self.props = PropertyEditor()
-        self.timeline = ScriptTimeline(self.props)
+        self.timeline = ScriptTimeline(self.props, self.task_manager)
 
         mid_box = QGroupBox("任务编排")
         mid_box.setStyleSheet(UIStyles.PANEL_EDITOR)
@@ -534,7 +544,7 @@ class TaskEditorWidget(QWidget):
         right_layout.setContentsMargins(5, 0, 5, 5)
 
         self.right_tabs = QTabWidget()
-        self.right_tabs.setStyleSheet(UIStyles.PANEL_EDITOR_RIGHT_TABS)
+        self.right_tabs.setStyleSheet(UIStyles.PANEL_EDITOR_TABS)
         self.right_tabs.addTab(self.props, "属性设置")
         self.right_tabs.addTab(self.batch_edit_widget, "同步调整")
         self.right_tabs.addTab(self.readme_widget, "任务说明")
@@ -546,6 +556,7 @@ class TaskEditorWidget(QWidget):
         self.props.data_changed.connect(self.mark_dirty)
         self.readme_widget.text_changed.connect(self.mark_dirty)
         self.toolbox.itemClicked.connect(self.on_toolbox_clicked)
+        self.subtask_list.itemClicked.connect(self.on_toolbox_clicked)
         self.timeline.itemClicked.connect(self.on_timeline_clicked)
         self.timeline.history_changed.connect(self.update_history_labels)
 
@@ -833,7 +844,7 @@ class ExecuteWidget(QWidget):
     def __init__(self, task_manager):
         super().__init__()
         self.task_manager = task_manager
-        self.scheduler = TaskScheduler()  # 任务调度引擎
+        self.scheduler = TaskScheduler(self.task_manager)  # 任务调度引擎
         self.signal_bridge = SignalBridge()  # 线程→主线程日志信号
         self.signal_bridge.log_signal.connect(self.handle_log)
         self._last_valid_loop_count = 1
@@ -1189,7 +1200,6 @@ class ExecuteWidget(QWidget):
 
         run_times = max(self.spin_run_times.value(), 1)
         timeout_sec = self.spin_timeout.value()
-        processed_script = self._preprocess_script(script_data, task_dir)
 
         start_msg = f"--- 开始任务: {task_name} (计划执行 {run_times} 次) ---"
         self.log_area.clear()
@@ -1206,7 +1216,9 @@ class ExecuteWidget(QWidget):
         self.spin_timeout.setEnabled(False)
         self.log_area.setFocus()
 
-        t = threading.Thread(target=self._thread_runner, args=(processed_script, run_times, timeout_sec))
+        t = threading.Thread(
+            target=self._thread_runner, args=(script_data, task_name, task_dir, run_times, timeout_sec)
+        )
         t.daemon = True
         t.start()
 
@@ -1215,18 +1227,7 @@ class ExecuteWidget(QWidget):
         self.scheduler.stop()
         self.signal_bridge.log_signal.emit("正在停止", ">>> 发送停止指令...", "正在停止...", False)
 
-    def _preprocess_script(self, script_data, task_dir):
-        """将脚本中的相对图片路径拼接为绝对路径"""
-        import copy
-
-        new_data = copy.deepcopy(script_data)
-        for step in new_data:
-            params = step.get("params", {})
-            if "image_path" in params:
-                params["image_path"] = os.path.join(task_dir, params["image_path"])
-        return new_data
-
-    def _thread_runner(self, script_data, run_times, timeout_sec):
+    def _thread_runner(self, script_data, task_name, task_dir, run_times, timeout_sec):
         """子线程：运行调度器并通过信号桥回传日志"""
 
         def event_adapter(event_type, message, data):
@@ -1235,8 +1236,8 @@ class ExecuteWidget(QWidget):
             loop_ctx = data.get("loop_context", "")
             title = step_desc if step_desc else message
             if loop_ctx:
-                title += f"  [{loop_ctx}]"
-            detail_msg = message
+                title += f"：{loop_ctx}"
+            detail_msg = message if step_desc else title
             brief_line2 = message
             is_detail_only = event_type == "DEBUG"
             self.signal_bridge.log_signal.emit(title, detail_msg, brief_line2, is_detail_only)
@@ -1246,7 +1247,7 @@ class ExecuteWidget(QWidget):
             "任务启动", f">>> 任务引擎已启动... (共 {run_times} 轮)", "正在初始化...", False
         )
         try:
-            self.scheduler.run_script(script_data, run_times=run_times, timeout_sec=timeout_sec)
+            self.scheduler.run_script(script_data, task_name, task_dir, run_times=run_times, timeout_sec=timeout_sec)
         except Exception as e:
             self.signal_bridge.log_signal.emit("异常停止", f"[Error] {e}", f"发生错误: {e}", False)
         finally:
@@ -1314,6 +1315,7 @@ class ManageTaskWidget(QWidget):
         self.input_new_name.setPlaceholderText("请输入新任务名称...")
         self.input_new_name.setMinimumHeight(UIDims.MANAGE_INPUT_HEIGHT)
         self.input_new_name.setStyleSheet(UIStyles.INPUT_MANAGE_NAME)
+        self.input_new_name.returnPressed.connect(self.create_task)
         btn_create = QPushButton("创建并编辑")
         btn_create.setMinimumHeight(UIDims.MANAGE_INPUT_HEIGHT)
         btn_create.setStyleSheet(UIStyles.BTN_CREATE_TASK)
@@ -1555,8 +1557,13 @@ class MainWindow(QMainWindow):
             self.tab_execute.refresh_list()
         elif index == 1:
             self.tab_manage.refresh_list()
-        if index == 2 and not self.tab_editor.current_task_name:
-            self.tab_editor.open_task(TaskManager.DRAFT_TASK_NAME)
+        elif index == 2:
+            self.tab_editor.subtask_list.populate_tasks()
+            if not self.tab_editor.current_task_name:
+                self.tab_editor.open_task(TaskManager.DRAFT_TASK_NAME)
+            else:
+                self.tab_editor.timeline.sync_subtask_names_in_ui()
+                self.tab_editor.timeline._soft_validate_structure()
 
     # ----- 跨页面协调方法 -----
 

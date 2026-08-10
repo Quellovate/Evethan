@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
     QStyle,
     QStyledItemDelegate,
     QStyleOptionButton,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -162,7 +163,7 @@ class HistoryManager:
         redo_text = self.redo_stack[-1][1] if self.redo_stack else "无"
         return undo_text, redo_text
 
- 
+
 # ============================================================
 #  自定义绘制委托：控制任务编排列表中每一行的绘制方式
 # ============================================================
@@ -239,6 +240,8 @@ class TaskDelegate(QStyledItemDelegate):
             bg_color = UIColors.BG_HOLD_SEL if is_highlight else UIColors.BG_HOLD
         elif cmd_type in ["anchor", "jump"]:
             bg_color = UIColors.BG_FLOW_SEL if is_highlight else UIColors.BG_FLOW
+        elif cmd_type == "call_subtask":
+            bg_color = UIColors.BG_SUBTASK_SEL if is_highlight else UIColors.BG_SUBTASK
         else:
             bg_color = UIColors.BG_NORMAL_SEL if is_highlight else UIColors.BG_NORMAL
 
@@ -353,18 +356,10 @@ class TaskDelegate(QStyledItemDelegate):
         # ---------- 软校验错误提示 ----------
         if error_msg:
             warning_rect = QRect(rect.right() - 35, rect.top(), 30, rect.height())
+            warning_font = painter.font()
+            warning_font.setPointSize(warning_font.pointSize() + 4)
+            painter.setFont(warning_font)
             painter.drawText(warning_rect, Qt.AlignCenter, "⚠️")
-
-            list_widget = option.widget
-            item = list_widget.item(index.row())
-            if item and item.toolTip() != error_msg:
-                item.setToolTip(error_msg)
-        else:
-            list_widget = option.widget
-            item = list_widget.item(index.row())
-            if item and item.toolTip():
-                item.setToolTip("")
-
         painter.restore()
 
 
@@ -465,6 +460,67 @@ class ToolboxList(QListWidget):
 
 
 # ============================================================
+#  子任务列表：左侧可拖拽的子任务面板
+# ============================================================
+class SubtaskList(QListWidget):
+    """左侧子任务列表：展示所有可调用的任务，支持拖拽以进行编排"""
+
+    def __init__(self, task_manager):
+        super().__init__()
+        self.task_manager = task_manager
+        self.setDragEnabled(True)
+        self.setStyleSheet(UIStyles.LIST_WIDGET_BASE)
+        self.populate_tasks()
+
+    def populate_tasks(self):
+        """刷新列表"""
+        self.clear()
+        tasks = self.task_manager.get_all_tasks()
+        # 过滤草稿任务
+        if self.task_manager.DRAFT_TASK_NAME in tasks:
+            tasks.remove(self.task_manager.DRAFT_TASK_NAME)
+
+        for task_name in tasks:
+            task_id = self.task_manager.task_name_map.get(task_name)
+            if not task_id:
+                continue
+
+            item = QListWidgetItem(f"📦 {task_name}")
+            item.setData(Qt.UserRole, "call_subtask")
+            item.setData(Qt.UserRole + 1, task_id)
+            item.setData(Qt.UserRole + 2, task_name)
+
+            item.setSizeHint(QSize(0, UIDims.TOOLBOX_ITEM_H))
+            item.setBackground(QBrush(UIColors.TOOLBOX_ITEM_SUBTASK))
+            self.addItem(item)
+
+    def startDrag(self, supportedActions):
+        """开始拖拽：将完整的 JSON 数据塞入剪贴板"""
+        item = self.currentItem()
+        if not item:
+            return
+
+        task_id = item.data(Qt.UserRole + 1)
+        task_name = item.data(Qt.UserRole + 2)
+
+        drag_data = [
+            {
+                "type": "call_subtask",
+                "desc": f"📦 调用任务: {task_name}",
+                "params": {"task_id": task_id, "task_name": task_name},
+                "checked": False,
+            }
+        ]
+
+        mime_data = QMimeData()
+        mime_data.setText(json.dumps(drag_data))
+        drag = QDrag(self)
+        drag.setMimeData(mime_data)
+
+        drag.exec(Qt.CopyAction)
+
+
+# ============================================================
 #  任务编排列表：管理所有指令的排列与交互
 # ============================================================
 class ScriptTimeline(QListWidget):
@@ -473,9 +529,10 @@ class ScriptTimeline(QListWidget):
     structure_changed = Signal()  # 结构变化信号（缩进/行号等需要刷新时）
     history_changed = Signal()  # 撤销/重做栈变化信号
 
-    def __init__(self, property_panel):
+    def __init__(self, property_panel, task_manager=None):
         super().__init__()
         self.property_panel = property_panel
+        self.task_manager = task_manager
         self.setAcceptDrops(True)
         self.setDragEnabled(True)
         self.setDragDropMode(QAbstractItemView.InternalMove)
@@ -484,6 +541,8 @@ class ScriptTimeline(QListWidget):
         self.setFocusPolicy(Qt.ClickFocus)
         self.setStyleSheet(UIStyles.TIMELINE_BASE)
         self.itemClicked.connect(self.on_item_clicked)
+        self.setMouseTracking(True)
+        self._last_error_item = None
 
         # 初始化历史管理器，并将回调传递给属性面板
         self.history_mgr = HistoryManager(self, max_history=50)
@@ -630,9 +689,55 @@ class ScriptTimeline(QListWidget):
 
     # -------------------- 数据加载/重建 --------------------
 
+    def _sync_subtask_names_in_data(self, data_list):
+        """自动更新内存数据中子任务的最新名称"""
+        if not self.task_manager:
+            return
+        for data in data_list:
+            if data.get("type") == "call_subtask":
+                task_id = data.get("params", {}).get("task_id")
+                if task_id:
+                    # 查找并更新底层参数
+                    actual_name = self.task_manager.task_id_map.get(task_id)
+                    if actual_name:
+                        old_name = data["params"].get("task_name")
+                        if old_name != actual_name:
+                            data["params"]["task_name"] = actual_name
+                            if data.get("desc") == f"📦 调用任务: {old_name}":
+                                data["desc"] = f"📦 调用任务: {actual_name}"
+
+    def sync_subtask_names_in_ui(self):
+        """自动更新编排面板中子任务的最新名称"""
+        if not self.task_manager:
+            return
+        has_changed = False
+        for i in range(self.count()):
+            item = self.item(i)
+            data = item.data(Qt.UserRole)
+            if data.get("type") == "call_subtask":
+                task_id = data.get("params", {}).get("task_id")
+                if task_id:
+                    actual_name = self.task_manager.task_id_map.get(task_id)
+                    if actual_name:
+                        old_name = data["params"].get("task_name")
+                        if old_name != actual_name:
+                            data["params"]["task_name"] = actual_name
+                            if data.get("desc") == f"📦 调用任务: {old_name}":
+                                data["desc"] = f"📦 调用任务: {actual_name}"
+                            item.setData(Qt.UserRole, data)
+                            has_changed = True
+
+        if has_changed:
+            self.refresh_line_numbers()
+            self.viewport().update()
+            current_item = self.currentItem()
+            if current_item:
+                self.on_item_clicked(current_item)
+
     def refresh_with_data(self, new_data_list):
         """用新的数据列表完整重建编排状态"""
         self.clear()
+        self._sync_subtask_names_in_data(new_data_list)
         for data in new_data_list:
             data["checked"] = False
             item = self._create_item_from_data(data)
@@ -820,9 +925,29 @@ class ScriptTimeline(QListWidget):
 
     def mouseMoveEvent(self, event):
         """鼠标移动：根据交互模式执行拖拽或滑动勾选"""
+
+        pos_int = event.position().toPoint()
+        item = self.itemAt(pos_int)
+
+        # 在结构错误的指令中弹出提示
+        if item:
+            error_msg = item.data(Qt.UserRole).get("_error", "")
+            if error_msg:
+                if self._last_error_item != item:
+                    row_idx = self.row(item) + 1
+                    row_msg = f"⚠️ [第 {row_idx} 行] {error_msg}"
+                    QToolTip.showText(event.globalPosition().toPoint(), row_msg, self)
+                    self._last_error_item = item
+            else:
+                if self._last_error_item:
+                    QToolTip.hideText()
+                    self._last_error_item = None
+        else:
+            if self._last_error_item:
+                QToolTip.hideText()
+                self._last_error_item = None
         if not self._drag_start_pos and self._interaction_mode != "standard":
             return
-        pos_int = event.position().toPoint()
         dist = (pos_int - self._drag_start_pos).manhattanLength() if self._drag_start_pos else 0
         if self._interaction_mode == "checkbox_wait":
             # 超过阈值且有勾选项时，启动拖拽
@@ -1182,6 +1307,13 @@ class ScriptTimeline(QListWidget):
             t = data.get("type", "")
             link_id = data.get("params", {}).get("link_id", "")
 
+            # 检查子任务是否丢失
+            if t == "call_subtask":
+                task_id = data.get("params", {}).get("task_id")
+                if self.task_manager and task_id not in self.task_manager.task_id_map:
+                    self._mark_error(item, "未找到所指定的任务，可能已被删除！")
+                continue
+
             if "start" in t and link_id:
                 stack.append({"type": t, "id": link_id, "row": i, "item": item})
 
@@ -1520,6 +1652,14 @@ class PropertyEditor(QWidget):
             val = data_dict["params"].get(key, default_val)
             label_text = PARAM_TRANSLATIONS.get(key, f"{key}:")
 
+            # --- 子任务调用控件 ---
+            if key in ["task_id", "task_name"]:
+                widget = QLineEdit(str(val))
+                widget.setReadOnly(True)
+                self.active_widgets[key] = widget
+                self.layout.addRow(label_text, widget)
+                continue
+
             # --- 鼠标按键下拉框 ---
             if key == "button":
                 widget = QComboBox()
@@ -1572,6 +1712,9 @@ class PropertyEditor(QWidget):
             if key == "target_id":
                 widget = QComboBox()
                 widget.setEditable(True)
+                widget.setFixedHeight(desc_edit.sizeHint().height())
+                widget.setStyleSheet(UIStyles.COMBOBOX_EDITABLE)
+
                 # 提取当前指令参数已保存的 ID
                 raw_id = str(val).split()[0] if str(val).strip() else ""
                 display_text = str(val)

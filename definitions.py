@@ -331,6 +331,12 @@ FACTORY_CONFIG = {
     },
     "group_end": {"label": "📂 分组结束", "desc": "分组结束点", "params": {"link_id": (str, "")}},
     "separator": {"label": "➖ —— 分割线 ——", "desc": "纯视觉分割", "params": {}},
+    # ---- 子任务 ----
+    "call_subtask": {
+        "label": "📦 调用子任务",
+        "desc": "将另一个任务作为子任务在此处执行",
+        "params": {"task_id": (str, ""), "task_name": (str, "")},
+    },
 }
 
 # ============================================================
@@ -371,6 +377,8 @@ PARAM_TRANSLATIONS = {
     "collapsed": "默认折叠状态",
     "anchor_id": "当前锚点 ID",
     "target_id": "目标锚点 ID",
+    "task_id": "子任务 ID",
+    "task_name": "子任务名称",
 }
 
 # ============================================================
@@ -461,4 +469,5 @@ DISPLAY_NAME_OVERRIDE = {
     "else_branch": "🔀 否则 (Else)",
     "mouse_hold_start": "🖱️ 鼠标按下&抬起",
     "key_hold_start": "⌨️ 键盘按下&抬起",
+    "call_subtask": "📦 调用子任务",
 }
