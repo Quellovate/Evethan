@@ -68,7 +68,7 @@ except ImportError:
     sys.exit(1)
 
 try:
-    from tools import ScreenTool
+    from tools import ScreenTool, ColorPickerTool, ColorResultDialog
 except ImportError:
     print("错误: 找不到 tools.py")
     sys.exit(1)
@@ -1464,7 +1464,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_settings, "其它设置")
         self.tab_settings.settings_changed.connect(self.on_settings_changed)
 
-        # --- 右上角工具按钮（定位仪、测距仪） ---
+        # --- 右上角工具按钮（定位仪、测距仪、取色器） ---
         corner_widget = QWidget()
         corner_layout = QHBoxLayout(corner_widget)
         corner_layout.setContentsMargins(0, 0, 8, 0)
@@ -1480,8 +1480,14 @@ class MainWindow(QMainWindow):
         btn_global_rule.setStyleSheet(UIStyles.BTN_CORNER_TOOL)
         btn_global_rule.clicked.connect(self.open_global_ruler)
 
+        btn_global_color = QPushButton("取色器")
+        btn_global_color.setCursor(Qt.PointingHandCursor)
+        btn_global_color.setStyleSheet(UIStyles.BTN_CORNER_TOOL)
+        btn_global_color.clicked.connect(self.open_global_color_picker)
+
         corner_layout.addWidget(btn_global_pick)
         corner_layout.addWidget(btn_global_rule)
+        corner_layout.addWidget(btn_global_color)
         self.tabs.setCornerWidget(corner_widget, Qt.TopRightCorner)
 
         main_layout.addWidget(self.tabs)
@@ -1548,6 +1554,18 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self, "测距结果", f"起点坐标: ({x - dx}, {y - dy})\n终点坐标: ({x}, {y})\n相对偏移: dx={dx}, dy={dy}"
         )
+
+    def open_global_color_picker(self):
+        """打开取色器"""
+        self.color_picker = ColorPickerTool()
+        self.color_picker.picked.connect(self.show_color_result)
+        self.color_picker.show()
+
+    def show_color_result(self, samples):
+        if not samples:
+            return
+        self.color_result_dialog = ColorResultDialog(samples, self)
+        self.color_result_dialog.show()
 
     # ----- 标签页切换 -----
 

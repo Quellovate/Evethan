@@ -342,3 +342,39 @@ class Utils:
             else:
                 unsupported_keys.append(k)
         return mapped_codes, unsupported_keys
+
+
+# ================================================================
+#  色彩处理
+# ================================================================
+from dataclasses import dataclass
+from typing import Tuple, List
+
+@dataclass
+class ColorStats:
+    rgb_min: Tuple[int, int, int]
+    rgb_max: Tuple[int, int, int]
+    hsv_min: Tuple[float, float, float]
+    hsv_max: Tuple[float, float, float]
+
+class ColorUtils:
+    @staticmethod
+    def hsv_circular_min_interval(hues: np.ndarray) -> Tuple[float, float]:
+        """计算色相范围的最短距离区间"""
+        if len(hues) == 0:
+            return (0.0, 0.0)
+        hs = np.sort(hues % 360.0)
+        if np.all(np.abs(hs - hs[0]) < 1e-6):
+            return (float(hs[0]), float(hs[0]))
+        gaps = [(hs[i + 1] - hs[i], i, i + 1) for i in range(len(hs) - 1)]
+        gaps.append(((hs[0] + 360.0) - hs[-1], len(hs) - 1, 0))
+        max_gap, i, j = max(gaps, key=lambda x: x[0])
+        return (float(hs[j]), float(hs[i]))
+
+    @staticmethod
+    def rgb_to_hsv_cv2(rgb_arr: np.ndarray) -> np.ndarray:
+        """RGB 转 HSV"""
+        rgb_normalized = (rgb_arr / 255.0).astype(np.float32)
+        rgb_reshaped = rgb_normalized.reshape(1, -1, 3)
+        hsv_reshaped = cv2.cvtColor(rgb_reshaped, cv2.COLOR_RGB2HSV)
+        return hsv_reshaped.reshape(-1, 3)

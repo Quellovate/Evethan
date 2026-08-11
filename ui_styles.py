@@ -235,7 +235,7 @@ class UIColors:
     OSD_BTN_BG = QColor(255, 255, 255, 200)
 
     # --- 工具模式叠加层颜色 ---
-    TOOL_OVERLAY = QColor(0, 0, 0, 100)
+    TOOL_OVERLAY = QColor(0, 0, 0, 30)
     TOOL_CROSSHAIR = PURE_GREEN
     TOOL_RECT_SCREENSHOT = QColor(0, 255, 255)
     TOOL_RECT_SELECT = QColor(255, 165, 0)

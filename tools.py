@@ -5,6 +5,8 @@ import sys
 import os
 import ctypes
 import platform
+import numpy as np
+import cv2
 
 # Windows 下设置 DPI 感知，避免高分屏缩放导致坐标不准
 if platform.system() == "Windows":
@@ -18,11 +20,13 @@ if platform.system() == "Windows":
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
 
-from PySide6.QtWidgets import QWidget, QApplication, QVBoxLayout, QLabel
-from PySide6.QtCore import Qt, Signal, QPoint, QRect
-from PySide6.QtGui import QPainter, QPen, QColor, QFont, QPixmap, QCursor, QRegion, QKeySequence
+from PySide6.QtCore import QPoint, QRect, Qt, Signal
+from PySide6.QtGui import QColor, QCursor, QFont, QImage, QKeySequence, QPainter, QPen, QPixmap, QRegion
+from PySide6.QtWidgets import QApplication, QDialog, QHBoxLayout, QLabel, QSizePolicy, QSlider, QVBoxLayout, QWidget
+
 
 from ui_styles import UIColors, UIFonts, UIStyles, UIDims
+from utils import ColorUtils, ColorStats
 
 
 class ScreenTool(QWidget):
@@ -49,15 +53,22 @@ class ScreenTool(QWidget):
         self.start_pos = None  # 框选/测距的起点
         self.current_pos = QCursor.pos()  # 当前光标位置
         self.is_processing = False  # 防止重复处理
+        self._bg_pixmap = None
+
+    def showEvent(self, event):
+        screen = QApplication.primaryScreen()
+        self._bg_pixmap = screen.grabWindow(0)
+        super().showEvent(event)
 
     # 绘制
-
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         screen_w = self.width()
         screen_h = self.height()
         cx, cy = self.current_pos.x(), self.current_pos.y()
+        if self._bg_pixmap:
+            painter.drawPixmap(0, 0, self._bg_pixmap)
 
         is_selecting = (self.mode in ("screenshot", "rect_select")) and self.start_pos
 
@@ -230,9 +241,13 @@ class ScreenTool(QWidget):
 
                 if self.mode == "screenshot":
                     # 截取选区图像
-                    screen = QApplication.primaryScreen()
-                    pixmap = screen.grabWindow(0, rect.x(), rect.y(), rect.width(), rect.height())
+                    if self._bg_pixmap:
+                        pixmap = self._bg_pixmap.copy(rect)
+                    else:
+                        screen = QApplication.primaryScreen()
+                        pixmap = screen.grabWindow(0, rect.x(), rect.y(), rect.width(), rect.height())
                     self.screenshot_created.emit(pixmap)
+
                 elif self.mode == "rect_select":
                     self.rect_selected.emit([rect.x(), rect.y(), rect.width(), rect.height()])
 
@@ -378,3 +393,268 @@ class KeyRecorder(QWidget):
                 self.close()
             else:
                 self._update_display()
+
+
+class ColorPickerTool(QWidget):
+    """
+    取色器：全屏取色遮罩层
+    通过点击或拖拽进行取色
+    """
+
+    picked = Signal(list)
+
+    def __init__(self):
+        super().__init__()
+        self.setAttribute(Qt.WA_DeleteOnClose)
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+
+        self.target_screen = QApplication.primaryScreen()
+        self.setGeometry(self.target_screen.geometry())
+
+        self.setCursor(Qt.CrossCursor)
+        self.setMouseTracking(True)
+
+        self._pix = None
+        self._img = None
+        self._collecting = False
+        self._samples = []
+        self._last_pos = None
+        self._device_ratio = self.target_screen.devicePixelRatio()
+
+    def showEvent(self, e):
+        """截取整个屏幕画面"""
+        self._pix = self.target_screen.grabWindow(0)
+        self._img = self._pix.toImage()
+        self._last_pos = self.mapFromGlobal(QCursor.pos())
+        super().showEvent(e)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        screen_w, screen_h = self.width(), self.height()
+
+        if self._pix:
+            p.drawPixmap(0, 0, self._pix)
+
+        # 绘制遮罩
+        p.fillRect(self.rect(), UIColors.TOOL_OVERLAY)
+
+        # 绘制提示文字
+        p.setFont(UIFonts.tool_overlay())
+        p.setPen(UIColors.TOOL_HINT_TEXT)
+        p.drawText(
+            QRect(0, 50, screen_w, 50), Qt.AlignCenter, "【取色模式】 点击或拖拽进行采样 -> 松开完成 （右键退出）"
+        )
+
+        # 绘制预览与取色信息
+        if self._last_pos:
+            x, y = self._last_pos.x(), self._last_pos.y()
+            p.setPen(QPen(UIColors.TOOL_CROSSHAIR, 1))
+            p.drawLine(x - 10, y, x + 10, y)
+            p.drawLine(x, y - 10, x, y + 10)
+
+            color = self.sample_at(self._last_pos)
+            if color and self._img:
+                r, g, b = color
+                info_text_lines = [f"X: {x}, Y: {y}", f"RGB: ({r}, {g}, {b})"]
+                fm = p.fontMetrics()
+                line_height = fm.height() + 5
+                max_width = max(fm.horizontalAdvance(line) for line in info_text_lines)
+                total_h = len(info_text_lines) * line_height
+
+                zoom_pixels, zoom_scale = 11, 8
+                mag_size = zoom_pixels * zoom_scale
+                offset_dist = UIDims.TOOL_CURSOR_OFFSET
+                draw_x, draw_y = x + offset_dist, y + offset_dist
+
+                if x > screen_w / 2:
+                    draw_x = x - offset_dist - max(max_width, mag_size)
+                if y > screen_h / 2:
+                    draw_y = y - offset_dist - total_h - mag_size - 10
+
+                p.setPen(UIColors.TOOL_COORD_TEXT)
+                text_start_y = draw_y + fm.ascent()
+                for i, line in enumerate(info_text_lines):
+                    p.drawText(draw_x, text_start_y + (i * line_height), line)
+
+                # 绘制放大镜
+                mag_rect = QRect(draw_x, draw_y + total_h + 5, mag_size, mag_size)
+                px_x, px_y = int(x * self._device_ratio), int(y * self._device_ratio)
+                half_z = zoom_pixels // 2
+                src_rect = QRect(px_x - half_z, px_y - half_z, zoom_pixels, zoom_pixels)
+                p.drawImage(mag_rect, self._img.copy(src_rect))
+
+                p.setPen(QPen(QColor(255, 255, 255, 80), 1))
+                for i in range(zoom_pixels + 1):
+                    line_x = mag_rect.x() + i * zoom_scale
+                    p.drawLine(line_x, mag_rect.y(), line_x, mag_rect.bottom())
+                    line_y = mag_rect.y() + i * zoom_scale
+                    p.drawLine(mag_rect.x(), line_y, mag_rect.right(), line_y)
+
+                center_rect = QRect(
+                    mag_rect.x() + half_z * zoom_scale, mag_rect.y() + half_z * zoom_scale, zoom_scale, zoom_scale
+                )
+                p.setPen(QPen(Qt.red, 2))
+                p.drawRect(center_rect)
+
+                info_rect = QRect(mag_rect.x(), mag_rect.bottom(), mag_size, 20)
+                p.fillRect(info_rect, QColor(r, g, b))
+                p.setPen(QPen(UIColors.TOOL_CROSSHAIR, 1))
+                p.drawRect(mag_rect)
+                p.drawRect(info_rect)
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.RightButton:
+            self.close()
+        elif e.button() == Qt.LeftButton:
+            self._collecting = True
+            self._samples.clear()
+            self._last_pos = e.position().toPoint()
+            self.add_sample(self._last_pos)
+            self.update()
+
+    def mouseMoveEvent(self, e):
+        self._last_pos = e.position().toPoint()
+        if self._collecting:
+            self.add_sample(self._last_pos)
+        self.update()
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton and self._collecting:
+            self._collecting = False
+            self.picked.emit(self._samples[:])
+            self.close()
+
+    def add_sample(self, pos):
+        """提取颜色并加入样本库"""
+        c = self.sample_at(pos)
+        if c:
+            self._samples.append(c)
+
+    def sample_at(self, pos):
+        """获取指定坐标的 RGB 值"""
+        if not self._img:
+            return None
+        px_x = max(0, min(int(pos.x() * self._device_ratio), self._img.width() - 1))
+        px_y = max(0, min(int(pos.y() * self._device_ratio), self._img.height() - 1))
+        qc = QColor(self._img.pixel(px_x, px_y))
+        return (qc.red(), qc.green(), qc.blue())
+
+
+class ColorResultDialog(QDialog):
+    """
+    计算 RGB 和 HSV 的范围并展示
+    提供一个滑动条，动态生成并预览所选颜色范围
+    """
+
+    def __init__(self, samples, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("取色结果")
+        self.resize(600, 450)
+        self.setWindowFlags(Qt.Dialog | Qt.WindowStaysOnTopHint)
+
+        self.info_label = QLabel()
+        self.info_label.setFont(UIFonts.app_default())
+        self.info_label.setTextFormat(Qt.RichText)
+
+        self.img_label = QLabel()
+        self.img_label.setAlignment(Qt.AlignCenter)
+        self.img_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setTickPosition(QSlider.TicksBelow)
+        self.slider.setTickInterval(100)
+
+        self.val_label = QLabel("V: 0")
+        self.val_label.setFont(UIFonts.app_default())
+        self.val_label.setStyleSheet(f"color: {UIColors.Semantic.TEXT_PRIMARY};")
+
+        lbl_slider = QLabel("调节亮度(V):")
+        lbl_slider.setFont(UIFonts.app_default())
+        lbl_slider.setStyleSheet(f"color: {UIColors.Semantic.TEXT_PRIMARY};")
+
+        slider_layout = QHBoxLayout()
+        slider_layout.addWidget(lbl_slider)
+        slider_layout.addWidget(self.slider)
+        slider_layout.addWidget(self.val_label)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.info_label)
+        layout.addWidget(self.img_label, 1)
+        layout.addLayout(slider_layout)
+
+        self.slider.valueChanged.connect(self._generate_base_image)
+        self._H = None
+        self._S = None
+
+        self.process_samples(samples)
+
+    def process_samples(self, samples):
+        """计算极值，转换色彩空间，生成预览图"""
+        arr_rgb = np.array(samples)
+        rmin, gmin, bmin = arr_rgb.min(axis=0)
+        rmax, gmax, bmax = arr_rgb.max(axis=0)
+        r_mean, g_mean, b_mean = arr_rgb.mean(axis=0)
+        hex_code = f"#{int(r_mean):02X}{int(g_mean):02X}{int(b_mean):02X}"
+
+        arr_hsv = ColorUtils.rgb_to_hsv_cv2(arr_rgb)
+        hues = arr_hsv[:, 0]
+        svals = arr_hsv[:, 1] * 255.0
+        vvals = arr_hsv[:, 2] * 255.0
+
+        h_lo, h_hi = ColorUtils.hsv_circular_min_interval(hues)
+        smin, smax = svals.min(), svals.max()
+        vmin, vmax = vvals.min(), vvals.max()
+
+        txt = (
+            f"<table width='100%' style='color: {UIColors.Semantic.TEXT_PRIMARY};'>"
+            f"  <tr>"
+            f"    <td width='50%' valign='top'>"
+            f"      <b>RGB 范围</b><br><br>"
+            f"      R: [{rmin}, {rmax}]<br>"
+            f"      G: [{gmin}, {gmax}]<br>"
+            f"      B: [{bmin}, {bmax}]<br><br>"
+            f"      <b>中心色值:</b> {hex_code} "
+            f"      <span style='background-color: {hex_code}; border: 1px solid {UIColors.Semantic.BORDER_DEFAULT};'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>"
+            f"    </td>"
+            f"    <td width='50%' valign='top'>"
+            f"      <b>HSV 范围</b><br><br>"
+            f"      H: [{h_lo:.1f}°, {h_hi:.1f}°]<br>"
+            f"      S: [{int(smin)}, {int(smax)}]<br>"
+            f"      V: [{int(vmin)}, {int(vmax)}]"
+            f"    </td>"
+            f"  </tr>"
+            f"</table>"
+        )
+        self.info_label.setText(txt)
+
+        if h_hi < h_lo:
+            h_hi += 360.0
+        h_arr = (np.linspace(h_lo, h_hi, 200) % 360.0) / 360.0
+        s_arr = np.linspace(smax, smin, 100) / 255.0
+        self._H, self._S = np.meshgrid(h_arr, s_arr)
+
+        self.slider.blockSignals(True)
+        self.slider.setRange(int(vmin), int(vmax))
+        self.slider.setValue(int(vmax))
+        self.slider.blockSignals(False)
+        self._generate_base_image(int(vmax))
+
+    def _generate_base_image(self, v_val):
+        """根据 V 值动态生成预览图"""
+        if self._H is None:
+            return
+        self.val_label.setText(f"V: {v_val}")
+
+        V = np.full_like(self._H, v_val / 255.0)
+        hsv_image = np.dstack((self._H * 360.0, self._S, V)).astype(np.float32)
+        rgb_image = cv2.cvtColor(hsv_image, cv2.COLOR_HSV2RGB)
+
+        img_data = (rgb_image * 255).astype(np.uint8)
+        h, w, ch = img_data.shape
+        qimg = QImage(img_data.data, w, h, ch * w, QImage.Format_RGB888).copy()
+
+        self.img_label.setPixmap(
+            QPixmap.fromImage(qimg).scaled(self.img_label.size(), Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        )

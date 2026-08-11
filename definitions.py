@@ -299,7 +299,7 @@ FACTORY_CONFIG = {
     "loop_end": {"label": "🔁 循环结束", "desc": "循环回跳点", "params": {"link_id": (str, "")}},
     "if_start": {
         "label": "🔀 判断:若识图成功",
-        "desc": "限时循环找图，成功则执行下方，失败则跳过或执行Else",
+        "desc": "限时循环找图，成功则执行下方指令，失败则跳过或执行Else",
         "params": {
             "image_path": (str, "cond.png"),
             "region": (list, [0, 0, 0, 0]),
@@ -311,12 +311,12 @@ FACTORY_CONFIG = {
             "collapsed": (bool, False),
         },
     },
+    "if_end": {"label": "🔀 判断结束", "desc": "逻辑分支结束点", "params": {"link_id": (str, "")}},
     "else_branch": {
         "label": "🔀 否则 (Else)",
         "desc": "当判断条件不满足时执行此处的指令",
         "params": {"link_id": (str, "")},
     },
-    "if_end": {"label": "🔀 判断结束", "desc": "逻辑分支结束点", "params": {"link_id": (str, "")}},
     "anchor": {
         "label": "📌 锚点",
         "desc": "设置可供跳转的锚点位置",
