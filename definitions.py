@@ -25,12 +25,33 @@ DEFAULT_APP_SETTINGS = {
 # ============================================================
 # 动作工厂配置（每种动作的元信息与默认参数）
 # 格式：参数名 -> (类型, 默认值)
+
+# traits 特征:
+# "start"      : 结构起点
+# "end"        : 结构终点
+# "branch"     : 结构分支
+# "fold"       : 可折叠
+# "key_record" : 按键录制
+# "flow"       : 流程控制
+# "separator"  : 分割线
+#
+# ui_bg 背景色:
+# "normal"     : 普通操作：白色
+# "loop"       : 循环：橙色
+# "group"      : 分组：绿色
+# "if"         : 条件判断：蓝色
+# "hold"       : 鼠标/键盘长按：紫色
+# "flow"       : 跳转/中断：红色
+# "subtask"    : 子任务：青色
+# "separator"  : 分割线：紫色
 # ============================================================
 FACTORY_CONFIG = {
     # ---- 鼠标移动 / 滚轮 ----
     "mouse_move": {
         "label": "🖱️ 鼠标移动",
         "desc": "将鼠标移动到指定坐标",
+        "traits": [],
+        "ui_bg": "normal",
         "params": {
             "x": (int, 0),
             "y": (int, 0),
@@ -45,6 +66,8 @@ FACTORY_CONFIG = {
     "camera_turn": {
         "label": "🔄 视角转动",
         "desc": "用于 3D 游戏的视角旋转",
+        "traits": [],
+        "ui_bg": "normal",
         "params": {
             "drag_dx": (int, 200),
             "drag_dy": (int, 0),
@@ -58,6 +81,8 @@ FACTORY_CONFIG = {
     "scroll": {
         "label": "🖱️ 滚轮滚动",
         "desc": "滚动鼠标滚轮（正数向上, 负数向下）",
+        "traits": [],
+        "ui_bg": "normal",
         "params": {
             "scroll_amount": (int, -100),
             "random_range": (int, 10),
@@ -69,6 +94,8 @@ FACTORY_CONFIG = {
     "fixed_click": {
         "label": "👆 固定坐标点击",
         "desc": "将鼠标移动到指定坐标后点击",
+        "traits": [],
+        "ui_bg": "normal",
         "params": {
             "x": (int, 0),
             "y": (int, 0),
@@ -87,6 +114,8 @@ FACTORY_CONFIG = {
     "offset_click": {
         "label": "👆 相对偏移点击",
         "desc": "相对于当前鼠标位置偏移后点击",
+        "traits": [],
+        "ui_bg": "normal",
         "params": {
             "off_x": (int, 0),
             "off_y": (int, 0),
@@ -105,6 +134,8 @@ FACTORY_CONFIG = {
     "image_click": {
         "label": "👆 识图点击",
         "desc": "成功识别图片后点击（默认点击图片中心）",
+        "traits": [],
+        "ui_bg": "normal",
         "params": {
             "image_path": (str, "target.png"),
             "region": (list, [0, 0, 0, 0]),
@@ -129,6 +160,8 @@ FACTORY_CONFIG = {
     "fixed_long_press": {
         "label": "⏱️ 固定坐标长按",
         "desc": "将鼠标移动到指定坐标后长按",
+        "traits": [],
+        "ui_bg": "normal",
         "params": {
             "x": (int, 0),
             "y": (int, 0),
@@ -148,6 +181,8 @@ FACTORY_CONFIG = {
     "offset_long_press": {
         "label": "⏱️ 相对偏移长按",
         "desc": "相对于当前鼠标位置偏移后长按",
+        "traits": [],
+        "ui_bg": "normal",
         "params": {
             "off_x": (int, 0),
             "off_y": (int, 0),
@@ -167,6 +202,8 @@ FACTORY_CONFIG = {
     "image_long_press": {
         "label": "⏱️ 识图长按",
         "desc": "成功识别图片后长按（默认长按图片中心）",
+        "traits": [],
+        "ui_bg": "normal",
         "params": {
             "image_path": (str, "target.png"),
             "region": (list, [0, 0, 0, 0]),
@@ -192,6 +229,8 @@ FACTORY_CONFIG = {
     "mouse_drag": {
         "label": "✋ 鼠标拖拽",
         "desc": "将鼠标从指定起点按住拖拽到指定终点",
+        "traits": [],
+        "ui_bg": "normal",
         "params": {
             "x1": (int, 0),
             "y1": (int, 0),
@@ -208,6 +247,8 @@ FACTORY_CONFIG = {
     "image_drag": {
         "label": "✋ 识图拖拽",
         "desc": "成功识别图片后相对拖拽指定距离",
+        "traits": [],
+        "ui_bg": "normal",
         "params": {
             "image_path": (str, "target.png"),
             "region": (list, [0, 0, 0, 0]),
@@ -230,6 +271,8 @@ FACTORY_CONFIG = {
     "key_press": {
         "label": "⌨️ 键盘按键",
         "desc": "敲击键盘按键",
+        "traits": ["key_record"],
+        "ui_bg": "normal",
         "params": {
             "key_code": (str, "space"),
             "repeat": (int, 1),
@@ -242,6 +285,8 @@ FACTORY_CONFIG = {
     "key_long_press": {
         "label": "⌨️ 键盘长按",
         "desc": "长按键盘按键",
+        "traits": ["key_record"],
+        "ui_bg": "normal",
         "params": {
             "key_code": (str, "w"),
             "duration_s": (float, 1.5),
@@ -256,28 +301,44 @@ FACTORY_CONFIG = {
     "mouse_hold_start": {
         "label": "🖱️ 鼠标按下 (开始)",
         "desc": "按下鼠标按键并保持，直到遇到结束节点",
+        "traits": ["start"],
+        "ui_bg": "hold",
         "params": {"button": (str, "left"), "link_id": (str, ""), "wait_min": (int, 50), "wait_max": (int, 200)},
     },
     "mouse_hold_end": {
         "label": "🖱️ 鼠标抬起 (结束)",
         "desc": "释放前面按住的鼠标按键",
+        "traits": ["end"],
+        "ui_bg": "hold",
         "params": {"link_id": (str, "")},
     },
     "key_hold_start": {
         "label": "⌨️ 键盘按下 (开始)",
         "desc": "按下键盘按键并保持，支持修饰键",
+        "traits": ["start", "key_record"],
+        "ui_bg": "hold",
         "params": {"key_code": (str, "shift"), "link_id": (str, ""), "wait_min": (int, 50), "wait_max": (int, 200)},
     },
-    "key_hold_end": {"label": "⌨️ 键盘抬起 (结束)", "desc": "释放前面按住的键盘按键", "params": {"link_id": (str, "")}},
+    "key_hold_end": {
+        "label": "⌨️ 键盘抬起 (结束)",
+        "desc": "释放前面按住的键盘按键",
+        "traits": ["end"],
+        "ui_bg": "hold",
+        "params": {"link_id": (str, "")},
+    },
     # ---- 等待 / 找图 ----
     "wait": {
         "label": "⏳ 延时等待",
         "desc": "任务暂停等待一段时间",
+        "traits": [],
+        "ui_bg": "normal",
         "params": {"time_s": (float, 2.0), "random_add_s": (float, 0.5)},
     },
     "find_image": {
         "label": "🔍 寻找图片",
         "desc": "循环找图直到成功识别，再执行下一步",
+        "traits": [],
+        "ui_bg": "normal",
         "params": {
             "image_path": (str, "check.png"),
             "region": (list, [0, 0, 0, 0]),
@@ -289,17 +350,39 @@ FACTORY_CONFIG = {
         },
     },
     # ---- 流程控制 ----
-    "break_loop": {"label": "🛑 跳出循环", "desc": "强制退出当前所在的循环层（只跳一层）", "params": {}},
-    "stop_task": {"label": "🛑 停止任务", "desc": "强制终止整个任务，不再运行", "params": {}},
+    "break_loop": {
+        "label": "🛑 跳出循环",
+        "desc": "强制退出当前所在的循环层（只跳一层）",
+        "traits": ["flow"],
+        "ui_bg": "flow",
+        "params": {},
+    },
+    "stop_task": {
+        "label": "🛑 停止任务",
+        "desc": "强制终止整个任务，不再运行",
+        "traits": ["flow"],
+        "ui_bg": "flow",
+        "params": {},
+    },
     "loop_start": {
         "label": "🔁 For 循环开始",
         "desc": "设定循环次数",
+        "traits": ["start", "fold"],
+        "ui_bg": "loop",
         "params": {"count": (int, 5), "link_id": (str, ""), "collapsed": (bool, False)},  # link_id 用于配对循环结束
     },
-    "loop_end": {"label": "🔁 循环结束", "desc": "循环回跳点", "params": {"link_id": (str, "")}},
+    "loop_end": {
+        "label": "🔁 循环结束",
+        "desc": "循环回跳点",
+        "traits": ["end"],
+        "ui_bg": "loop",
+        "params": {"link_id": (str, "")},
+    },
     "if_start": {
         "label": "🔀 判断:若识图成功",
         "desc": "限时循环找图，成功则执行下方指令，失败则跳过或执行Else",
+        "traits": ["start", "fold"],
+        "ui_bg": "if",
         "params": {
             "image_path": (str, "cond.png"),
             "region": (list, [0, 0, 0, 0]),
@@ -311,30 +394,62 @@ FACTORY_CONFIG = {
             "collapsed": (bool, False),
         },
     },
-    "if_end": {"label": "🔀 判断结束", "desc": "逻辑分支结束点", "params": {"link_id": (str, "")}},
+    "if_end": {
+        "label": "🔀 判断结束",
+        "desc": "逻辑分支结束点",
+        "traits": ["end"],
+        "ui_bg": "if",
+        "params": {"link_id": (str, "")},
+    },
     "else_branch": {
         "label": "🔀 否则 (Else)",
         "desc": "当判断条件不满足时执行此处的指令",
+        "traits": ["branch"],
+        "ui_bg": "if",
         "params": {"link_id": (str, "")},
     },
     "anchor": {
         "label": "📌 锚点",
         "desc": "设置可供跳转的锚点位置",
+        "traits": [],
+        "ui_bg": "flow",
         "params": {"anchor_id": (str, ""), "wait_min": (int, 50), "wait_max": (int, 100)},
     },
-    "jump": {"label": "🚀 跳转至锚点", "desc": "跳转到指定的锚点位置", "params": {"target_id": (str, "")}},
+    "jump": {
+        "label": "🚀 跳转至锚点",
+        "desc": "跳转到指定的锚点位置",
+        "traits": [],
+        "ui_bg": "flow",
+        "params": {"target_id": (str, "")},
+    },
     # ---- 分组 / 分割线 ----
     "group_start": {
         "label": "📂 任务分组",
         "desc": "折叠管理过长任务 (点击 + 号展开)",
+        "traits": ["start", "fold"],
+        "ui_bg": "group",
         "params": {"label": (str, "新分组"), "link_id": (str, ""), "collapsed": (bool, False)},
     },
-    "group_end": {"label": "📂 分组结束", "desc": "分组结束点", "params": {"link_id": (str, "")}},
-    "separator": {"label": "➖ —— 分割线 ——", "desc": "纯视觉分割", "params": {}},
+    "group_end": {
+        "label": "📂 分组结束",
+        "desc": "分组结束点",
+        "traits": ["end"],
+        "ui_bg": "group",
+        "params": {"link_id": (str, "")},
+    },
+    "separator": {
+        "label": "➖ —— 分割线 ——",
+        "desc": "纯视觉分割",
+        "traits": ["separator"],
+        "ui_bg": "separator",
+        "params": {"label": (str, "—— 分割线 ——")},
+    },
     # ---- 子任务 ----
     "call_subtask": {
         "label": "📦 调用子任务",
         "desc": "将另一个任务作为子任务在此处执行",
+        "traits": [],
+        "ui_bg": "subtask",
         "params": {"task_id": (str, ""), "task_name": (str, "")},
     },
 }

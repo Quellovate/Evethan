@@ -130,7 +130,7 @@ class Semantic:
     AUX_LIGHT_TEXT = Palette.PURPLE_700
     AUX_DARK_TEXT = Palette.PURPLE_900
 
-    # --- 特殊色（青） ---
+    # --- 信息色（青） ---
     INFO_BG = Palette.TEAL_500
     INFO_HOVER = Palette.TEAL_300
     INFO_PRESSED = Palette.TEAL_700

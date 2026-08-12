@@ -59,6 +59,24 @@ from ui_styles import UIColors, UIDims, UIStyles, UIFonts
 
 
 # ============================================================
+#  配置读取
+# ============================================================
+def get_cmd_config(cmd_type):
+    """获取指令的完整配置字典"""
+    return global_config.get_config().get(cmd_type, {})
+
+
+def get_traits(cmd_type):
+    """获取指令的特征"""
+    return get_cmd_config(cmd_type).get("traits", [])
+
+
+def get_ui_bg(cmd_type):
+    """获取指令的 UI 背景"""
+    return get_cmd_config(cmd_type).get("ui_bg", "normal")
+
+
+# ============================================================
 #  通用工厂：根据数据类型创建对应的输入控件
 # ============================================================
 class WidgetFactory:
@@ -179,12 +197,17 @@ class TaskDelegate(QStyledItemDelegate):
         params = item_data.get("params", {})
         rect = option.rect
 
-        # ---------- 分割线类型：特殊绘制后直接返回 ----------
-        if cmd_type == "separator":
+        # 获取特征和背景色配置
+        traits = get_traits(cmd_type)
+        ui_bg = get_ui_bg(cmd_type)
+
+        # ---------- 分割线类型：绘制后直接返回 ----------
+        if "separator" in traits:
             painter.fillRect(rect, UIColors.SEPARATOR_BG)
             painter.setPen(UIColors.SEPARATOR_TEXT)
             painter.setFont(UIFonts.delegate_separator(option.font))
-            painter.drawText(rect, Qt.AlignCenter, params.get("label", "—— 分割线 ——"))
+            display_text = item_data.get("desc", "—— 分割线 ——")
+            painter.drawText(rect, Qt.AlignCenter, display_text)
             painter.setPen(UIColors.SEPARATOR_LINE)
             painter.drawLine(rect.topLeft(), rect.topRight())
             painter.drawLine(rect.bottomLeft(), rect.bottomRight())
@@ -218,11 +241,10 @@ class TaskDelegate(QStyledItemDelegate):
         opt.state |= QStyle.State_On if is_checked else QStyle.State_Off
         style.drawPrimitive(QStyle.PE_IndicatorCheckBox, opt, painter, list_widget)
 
-        # ---------- 根据指令类型和选中状态决定背景色 ----------
+        # ---------- 根据 ui_bg 和选中状态决定背景色 ----------
         is_selected = option.state & QStyle.State_Selected
 
         # 同步高亮同一模块的配对节点
-        list_widget = option.widget
         active_pair = getattr(list_widget, "active_pair_info", None)
         current_row = index.row()
         is_active_pair = False
@@ -230,28 +252,23 @@ class TaskDelegate(QStyledItemDelegate):
             is_active_pair = True
         is_highlight = is_selected or is_active_pair
 
-        if "loop_" in cmd_type:
-            bg_color = UIColors.BG_LOOP_SEL if is_highlight else UIColors.BG_LOOP
-        elif "group_" in cmd_type:
-            bg_color = UIColors.BG_GROUP_SEL if is_highlight else UIColors.BG_GROUP
-        elif "if_" in cmd_type or cmd_type == "else_branch":
-            bg_color = UIColors.BG_IF_SEL if is_highlight else UIColors.BG_IF
-        elif "hold_" in cmd_type:
-            bg_color = UIColors.BG_HOLD_SEL if is_highlight else UIColors.BG_HOLD
-        elif cmd_type in ["anchor", "jump"]:
-            bg_color = UIColors.BG_FLOW_SEL if is_highlight else UIColors.BG_FLOW
-        elif cmd_type == "call_subtask":
-            bg_color = UIColors.BG_SUBTASK_SEL if is_highlight else UIColors.BG_SUBTASK
-        else:
-            bg_color = UIColors.BG_NORMAL_SEL if is_highlight else UIColors.BG_NORMAL
+        # ui_bg 映射字典：
+        BG_COLOR_MAP = {
+            "normal": (UIColors.BG_NORMAL, UIColors.BG_NORMAL_SEL),
+            "loop": (UIColors.BG_LOOP, UIColors.BG_LOOP_SEL),
+            "group": (UIColors.BG_GROUP, UIColors.BG_GROUP_SEL),
+            "if": (UIColors.BG_IF, UIColors.BG_IF_SEL),
+            "hold": (UIColors.BG_HOLD, UIColors.BG_HOLD_SEL),
+            "flow": (UIColors.BG_FLOW, UIColors.BG_FLOW_SEL),
+            "subtask": (UIColors.BG_SUBTASK, UIColors.BG_SUBTASK_SEL),
+            "separator": (UIColors.SEPARATOR_BG, UIColors.SEPARATOR_BG),
+        }
 
+        colors = BG_COLOR_MAP.get(ui_bg, BG_COLOR_MAP["normal"])
+        bg_color = colors[1] if is_highlight else colors[0]
         painter.fillRect(main_body_rect, bg_color)
 
         # ---------- 绘制缩进引导线（虚线 & 实线） ----------
-        list_widget = option.widget
-        active_pair = getattr(list_widget, "active_pair_info", None)
-        current_row = index.row()
-
         if indent_level > 0:
             step = UIDims.DELEGATE_INDENT_STEP
             strip_w = UIDims.DELEGATE_STRIP_WIDTH
@@ -275,9 +292,8 @@ class TaskDelegate(QStyledItemDelegate):
 
         content_start_x = rect.left() + strip_w + (indent_level * UIDims.DELEGATE_INDENT_STEP) + 5
 
-        # ---------- 分组起始行：绘制折叠按钮 + 标签 ----------
-        foldable_types = ["group_start", "loop_start", "if_start"]
-        if cmd_type in foldable_types:
+        # ---------- fold: 绘制折叠按钮 + 标签 ----------
+        if "fold" in traits:
             is_collapsed = params.get("collapsed", False)
             btn_size = UIDims.DELEGATE_FOLD_BTN_SIZE
             btn_rect = QRect(content_start_x, rect.top() + (rect.height() - btn_size) // 2, btn_size, btn_size)
@@ -290,18 +306,20 @@ class TaskDelegate(QStyledItemDelegate):
             painter.drawLine(center.x() - 3, center.y(), center.x() + 3, center.y())
             if is_collapsed:
                 painter.drawLine(center.x(), center.y() - 3, center.x(), center.y() + 3)
+
             text_x = content_start_x + btn_size + 8
             text = index.data(Qt.DisplayRole)
             painter.setFont(UIFonts.delegate_bold(option.font))
             text_rect = QRect(text_x, rect.top(), rect.right() - text_x, rect.height())
             painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, text)
 
-        # ---------- 按键类指令：绘制录制按钮和按键显示框 ----------
-        elif cmd_type in ["key_press", "key_long_press", "key_hold_start"]:
+        # ---------- key_record: 绘制录制按钮和按键显示框 ----------
+        elif "key_record" in traits:
             text = index.data(Qt.DisplayRole)
             painter.setPen(UIColors.TEXT_NORMAL)
             title_rect = QRect(content_start_x, rect.top() + 4, rect.right() - content_start_x, 20)
             painter.drawText(title_rect, Qt.AlignLeft | Qt.AlignTop, text)
+
             btn_y = rect.top() + UIDims.DELEGATE_INNER_MARGIN_TOP
             btn_rec_w = UIDims.BTN_REC_WIDTH
             btn_rec_h = UIDims.BTN_REC_HEIGHT
@@ -313,6 +331,7 @@ class TaskDelegate(QStyledItemDelegate):
             painter.setFont(UIFonts.delegate_rec_btn(option.font))
             painter.setPen(UIColors.BTN_RECORD_TEXT)
             painter.drawText(btn_rect, Qt.AlignCenter, "录制")
+
             # 按键值显示框
             display_x = content_start_x + btn_rec_w + 8
             display_rect = QRect(display_x, btn_y, 120, btn_rec_h)
@@ -328,13 +347,18 @@ class TaskDelegate(QStyledItemDelegate):
         else:
             text_x = content_start_x
             text = index.data(Qt.DisplayRole)
-            if any(x in cmd_type for x in ["loop_start", "if_start", "mouse_hold_start", "key_hold_start"]):
+
+            # start: 加粗
+            if "start" in traits:
                 painter.setFont(UIFonts.delegate_bold(option.font))
-            if cmd_type in ["break_loop", "stop_task"]:
+
+            # flow: 标红加粗
+            if "flow" in traits:
                 painter.setPen(UIColors.TEXT_KEYWORD)
                 painter.setFont(UIFonts.delegate_bold(option.font))
             else:
                 painter.setPen(UIColors.TEXT_NORMAL)
+
             text_rect = QRect(text_x, rect.top(), rect.right() - text_x, rect.height())
             painter.drawText(text_rect, Qt.AlignVCenter | Qt.AlignLeft, text)
 
@@ -360,6 +384,7 @@ class TaskDelegate(QStyledItemDelegate):
             warning_font.setPointSize(warning_font.pointSize() + 4)
             painter.setFont(warning_font)
             painter.drawText(warning_rect, Qt.AlignCenter, "⚠️")
+
         painter.restore()
 
 
@@ -635,25 +660,27 @@ class ScriptTimeline(QListWidget):
         self.viewport().update()
 
     def update_indentation_cache(self):
-        """遍历所有项，根据结构层级计算并缓存每项的缩进深度"""
+        """遍历所有项，根据 traits 计算并缓存每项的缩进深度"""
         depth = 0
         for i in range(self.count()):
             item = self.item(i)
             data = item.data(Qt.UserRole)
             t = data.get("type", "")
+            traits = get_traits(t)
             current_indent = depth
             # 结束标记：先减深度
-            if t in ["loop_end", "group_end", "if_end", "mouse_hold_end", "key_hold_end"]:
+            if "end" in traits:
                 depth = max(0, depth - 1)
                 current_indent = depth
-            elif t == "else_branch":
+            # 分支标记：当前行退一格，但不改变后续深度
+            elif "branch" in traits:
                 current_indent = max(0, depth - 1)
             # 仅在值变化时写入，减少不必要的 setData 调用
             if data.get("_cache_indent") != current_indent:
                 data["_cache_indent"] = current_indent
                 item.setData(Qt.UserRole, data)
             # 开始标记：后增深度
-            if t in ["loop_start", "group_start", "if_start", "mouse_hold_start", "key_hold_start"]:
+            if "start" in traits:
                 depth += 1
 
     def refresh_line_numbers(self):
@@ -663,8 +690,6 @@ class ScriptTimeline(QListWidget):
             data = item.data(Qt.UserRole)
             prefix = f"{i + 1}. "
             label = data.get("desc", "未命名")
-            if data["type"] == "group_start":
-                label = f"📂 {data['params'].get('label', '分组')}"
             item.setText(f"{prefix}{label}")
 
     def _apply_fold_states(self):
@@ -675,15 +700,15 @@ class ScriptTimeline(QListWidget):
             item = self.item(i)
             data = item.data(Qt.UserRole)
             t = data.get("type", "")
+            traits = get_traits(t)
             link_id = data.get("params", {}).get("link_id")
 
-            if t.endswith("_end") and collapsed_stack and collapsed_stack[-1] == link_id:
+            if "end" in traits and collapsed_stack and collapsed_stack[-1] == link_id:
                 collapsed_stack.pop()
-
             is_hidden = len(collapsed_stack) > 0
             item.setHidden(is_hidden)
 
-            if t in ["group_start", "loop_start", "if_start"]:
+            if "fold" in traits:
                 if data.get("params", {}).get("collapsed", False):
                     collapsed_stack.append(link_id)
 
@@ -752,16 +777,19 @@ class ScriptTimeline(QListWidget):
         self.refresh_with_data(script_data)
 
     def _create_item_from_data(self, data):
-        """根据数据字典创建一个 QListWidgetItem，并设置合适的行高"""
+        """根据数据字典创建一个 QListWidgetItem，并根据 traits 设置合适的行高"""
         item = QListWidgetItem()
         t = data.get("type", "")
+        traits = get_traits(t)
         height = UIDims.ITEM_H_NORMAL
-        if t in ["key_press", "key_long_press", "key_hold_start"]:
+
+        if "key_record" in traits:
             height = UIDims.ITEM_H_KEY
-        elif any(x in t for x in ["loop_", "group_", "if_", "mouse_hold_", "key_hold_"]):
+        elif "start" in traits or "end" in traits:
             height = UIDims.ITEM_H_STRUCTURE
-        elif t == "separator":
+        elif "separator" in traits:
             height = UIDims.ITEM_H_SEPARATOR
+
         item.setSizeHint(QSize(0, height))
         item.setData(Qt.UserRole, data)
         return item
@@ -873,7 +901,10 @@ class ScriptTimeline(QListWidget):
         if not item:
             super().mousePressEvent(event)
             return
+
         data = item.data(Qt.UserRole)
+        cmd_type = data.get("type", "")
+        traits = get_traits(cmd_type)
         rect = self.visualItemRect(item)
         indent = self._get_indent_level(self.row(item))
         strip_w = UIDims.DELEGATE_STRIP_WIDTH
@@ -881,15 +912,14 @@ class ScriptTimeline(QListWidget):
         content_start_x = rect.left() + strip_w + (indent * indent_step) + 5
 
         # 点击分组折叠按钮
-        foldable_types = ["group_start", "loop_start", "if_start"]
-        if data.get("type") in foldable_types:
+        if "fold" in traits:
             fold_btn_size = UIDims.DELEGATE_FOLD_BTN_SIZE
             if content_start_x <= x <= content_start_x + fold_btn_size:
                 self.toggle_fold(item)
                 return
 
         # 点击按键录制按钮
-        if data.get("type") in ["key_press", "key_long_press", "key_hold_start"]:
+        if "key_record" in traits:
             btn_y_start = rect.top() + UIDims.DELEGATE_INNER_MARGIN_TOP
             btn_x_start = content_start_x
             btn_w = UIDims.BTN_REC_WIDTH
@@ -899,7 +929,7 @@ class ScriptTimeline(QListWidget):
                 return
 
         # 点击左侧色条区域：进入勾选或滑动选择模式
-        if data.get("type") != "separator":
+        if "separator" not in traits:
             chk_size = UIDims.DELEGATE_CHECKBOX_SIZE
             chk_start = UIDims.DELEGATE_CHECKBOX_MARGIN_LEFT
             if x < strip_w:
@@ -920,6 +950,7 @@ class ScriptTimeline(QListWidget):
                 self._interaction_mode = "standard"
                 super().mousePressEvent(event)
         else:
+            # 分割线
             self._interaction_mode = "standard"
             super().mousePressEvent(event)
 
@@ -929,14 +960,21 @@ class ScriptTimeline(QListWidget):
         pos_int = event.position().toPoint()
         item = self.itemAt(pos_int)
 
+        if self._last_error_item:
+            try:
+                _ = self._last_error_item.listWidget() 
+            except RuntimeError:
+                self._last_error_item = None
+                QToolTip.hideText()
+
         # 在结构错误的指令中弹出提示
         if item:
             error_msg = item.data(Qt.UserRole).get("_error", "")
             if error_msg:
                 if self._last_error_item != item:
                     row_idx = self.row(item) + 1
-                    row_msg = f"⚠️ [第 {row_idx} 行] {error_msg}"
-                    QToolTip.showText(event.globalPosition().toPoint(), row_msg, self)
+                    detail_msg = f"⚠️ [第 {row_idx} 行] {error_msg}"
+                    QToolTip.showText(event.globalPosition().toPoint(), detail_msg, self)
                     self._last_error_item = item
             else:
                 if self._last_error_item:
@@ -1052,23 +1090,24 @@ class ScriptTimeline(QListWidget):
         if has_changed:
             self.viewport().update()
 
-    # -------------------- 分组折叠 --------------------
+    # -------------------- 模块折叠 --------------------
 
     def toggle_fold(self, item):
         """切换模块的折叠/展开状态，并记录快照"""
         data = item.data(Qt.UserRole)
         t = data.get("type")
-        if t not in ["group_start", "loop_start", "if_start"]:
+        traits = get_traits(t)
+
+        # 具有 fold 特征的指令才折叠
+        if "fold" not in traits:
             return
 
         is_collapsed = not data["params"].get("collapsed", False)
-
-        name_map = {"group_start": "分组", "loop_start": "循环", "if_start": "判断"}
-        module_name = name_map.get(t, "模块")
-        action_name = f"折叠{module_name}" if is_collapsed else f"展开{module_name}"
+        config = get_cmd_config(t)
+        module_name = config.get("label", "模块")
+        action_name = f"折叠 [{module_name}]" if is_collapsed else f"展开 [{module_name}]"
 
         self.history_mgr.create_snapshot(action_name)
-
         data["params"]["collapsed"] = is_collapsed
         item.setData(Qt.UserRole, data)
 
@@ -1305,6 +1344,8 @@ class ScriptTimeline(QListWidget):
             item = self.item(i)
             data = item.data(Qt.UserRole)
             t = data.get("type", "")
+            traits = get_traits(t)
+            ui_bg = get_ui_bg(t)
             link_id = data.get("params", {}).get("link_id", "")
 
             # 检查子任务是否丢失
@@ -1314,10 +1355,12 @@ class ScriptTimeline(QListWidget):
                     self._mark_error(item, "未找到所指定的任务，可能已被删除！")
                 continue
 
-            if "start" in t and link_id:
-                stack.append({"type": t, "id": link_id, "row": i, "item": item})
+            # 处理开始标记
+            if "start" in traits and link_id:
+                stack.append({"type": t, "id": link_id, "row": i, "item": item, "ui_bg": ui_bg})
 
-            elif "end" in t and link_id:
+            # 处理结束标记
+            elif "end" in traits and link_id:
                 # 寻找匹配的开始标记
                 found_idx = -1
                 for j in range(len(stack) - 1, -1, -1):
@@ -1334,9 +1377,12 @@ class ScriptTimeline(QListWidget):
                 else:
                     self._mark_error(item, "结构不完整：存在孤立的结束标记！")
 
-            elif t == "else_branch":
-                if not stack or stack[-1]["type"] != "if_start":
-                    self._mark_error(item, "结构错误：Else 必须放在 If 模块内部！")
+                # 处理分支标记
+            elif "branch" in traits:
+                if not stack or stack[-1]["ui_bg"] != ui_bg:
+                    config = get_cmd_config(t)
+                    label = config.get("label", "分支")
+                    self._mark_error(item, f"结构错误：[{label}] 必须放在对应的模块内部！")
                 elif stack[-1]["id"] != link_id:
                     data["params"]["link_id"] = stack[-1]["id"]
                     item.setData(Qt.UserRole, data)
@@ -1762,8 +1808,10 @@ class PropertyEditor(QWidget):
                 if key == "anchor_id" and isinstance(widget, QLineEdit):
                     widget.setReadOnly(True)
 
+                traits = get_traits(cmd_type)
+
                 # 按键录制控件：附带录制按钮
-                if key == "key_code":
+                if key == "key_code" and "key_record" in traits:
                     container = QWidget()
                     h_layout = QHBoxLayout(container)
                     h_layout.setContentsMargins(0, 0, 0, 0)
@@ -1964,7 +2012,7 @@ class PropertyEditor(QWidget):
                 self.history_callback(f"修改第 {self._get_current_row_idx()} 行指令的备注")
             self.current_data["desc"] = text
             # 分组/分割线备注同步更新 label
-            if self.current_data["type"] in ["group_start", "separator"]:
+            if "label" in self.current_data["params"]:
                 self.current_data["params"]["label"] = text
             self.current_item.setData(Qt.UserRole, self.current_data)
             if self.current_item.listWidget():
