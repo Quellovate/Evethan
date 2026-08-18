@@ -350,12 +350,14 @@ class Utils:
 from dataclasses import dataclass
 from typing import Tuple, List
 
+
 @dataclass
 class ColorStats:
     rgb_min: Tuple[int, int, int]
     rgb_max: Tuple[int, int, int]
     hsv_min: Tuple[float, float, float]
     hsv_max: Tuple[float, float, float]
+
 
 class ColorUtils:
     @staticmethod
@@ -378,3 +380,145 @@ class ColorUtils:
         rgb_reshaped = rgb_normalized.reshape(1, -1, 3)
         hsv_reshaped = cv2.cvtColor(rgb_reshaped, cv2.COLOR_RGB2HSV)
         return hsv_reshaped.reshape(-1, 3)
+
+    @staticmethod
+    def analyze_samples(samples: List[Tuple[int, int, int]]) -> dict:
+        """计算取色采样 RGB/HSV 的极值和中心色值"""
+        arr_rgb = np.array(samples)
+        r_min, g_min, b_min = arr_rgb.min(axis=0)
+        r_max, g_max, b_max = arr_rgb.max(axis=0)
+        r_mean, g_mean, b_mean = arr_rgb.mean(axis=0)
+        hex_code = f"#{int(r_mean):02X}{int(g_mean):02X}{int(b_mean):02X}"
+
+        arr_hsv = ColorUtils.rgb_to_hsv_cv2(arr_rgb)
+        hues = arr_hsv[:, 0]
+        svals = arr_hsv[:, 1] * 255.0
+        vvals = arr_hsv[:, 2] * 255.0
+
+        h_start, h_end = ColorUtils.hsv_circular_min_interval(hues)
+        s_min, s_max = svals.min(), svals.max()
+        v_min, v_max = vvals.min(), vvals.max()
+
+        return {
+            "rgb_min": (r_min, g_min, b_min),
+            "rgb_max": (r_max, g_max, b_max),
+            "hsv_min": (h_start, s_min, v_min),
+            "hsv_max": (h_end, s_max, v_max),
+            "hex_code": hex_code,
+        }
+
+    @staticmethod
+    def generate_hsv_gradient_matrix(
+        h_start: float, h_end: float, s_min: float, s_max: float, v_val: float, width=200, height=100
+    ) -> np.ndarray:
+        """生成 HSV 范围渐变矩阵"""
+        if h_end < h_start:
+            h_end += 360.0
+        h_arr = (np.linspace(h_start, h_end, width) % 360.0) / 360.0
+        s_arr = np.linspace(s_max, s_min, height) / 255.0
+        H, S = np.meshgrid(h_arr, s_arr)
+        V = np.full_like(H, v_val / 255.0)
+        hsv_image = np.dstack((H * 360.0, S, V)).astype(np.float32)
+        rgb_image = cv2.cvtColor(hsv_image, cv2.COLOR_HSV2RGB)
+        return (rgb_image * 255).astype(np.uint8)
+
+    @staticmethod
+    def hex_to_hsv(hex_str: str) -> Tuple[float, float, float]:
+        """Hex 转标准 HSV"""
+        hex_str = hex_str.lstrip("#")
+        if len(hex_str) != 6:
+            return 0.0, 0.0, 0.0
+        try:
+            r, g, b = int(hex_str[0:2], 16), int(hex_str[2:4], 16), int(hex_str[4:6], 16)
+        except ValueError:
+            return 0.0, 0.0, 0.0
+        arr = np.array([[r, g, b]])
+        hsv = ColorUtils.rgb_to_hsv_cv2(arr)[0]
+        return float(hsv[0]), float(hsv[1] * 255.0), float(hsv[2] * 255.0)
+
+    @staticmethod
+    def get_basic_hsv_ranges(hex_str: str, tolerance: int) -> dict:
+        """基础模式：根据中心色和容差，计算出 UI 显示的范围和 OpenCV 使用的范围"""
+        hc, sc, vc = ColorUtils.hex_to_hsv(hex_str)
+        t = max(0, min(100, tolerance))
+
+        # 实际偏移量
+        delta_h = (t / 100.0) * 20.0
+        delta_s = (t / 100.0) * 255 * 0.6
+        delta_v = (t / 100.0) * 255 * 0.75
+
+        # 限制极值范围
+        s_min, s_max = max(0, sc - delta_s), min(255, sc + delta_s)
+        v_min, v_max = max(0, vc - delta_v), min(255, vc + delta_v)
+
+        h_start = (hc - delta_h) % 360.0
+        h_end = (hc + delta_h) % 360.0
+
+        # OpenCV 底层所需数据
+        cv_s_min, cv_s_max = int(s_min), int(s_max)
+        cv_v_min, cv_v_max = int(v_min), int(v_max)
+        hsv_ranges = []
+
+        if hc - delta_h < 0:
+            hsv_ranges.append(((0, cv_s_min, cv_v_min), (int(h_end / 2), cv_s_max, cv_v_max)))
+            hsv_ranges.append(((int((360 + hc - delta_h) / 2), cv_s_min, cv_v_min), (180, cv_s_max, cv_v_max)))
+        elif hc + delta_h >= 360:
+            hsv_ranges.append(((int(h_start / 2), cv_s_min, cv_v_min), (180, cv_s_max, cv_v_max)))
+            hsv_ranges.append(((0, cv_s_min, cv_v_min), (int((hc + delta_h - 360) / 2), cv_s_max, cv_v_max)))
+        else:
+            hsv_ranges.append(((int(h_start / 2), cv_s_min, cv_v_min), (int(h_end / 2), cv_s_max, cv_v_max)))
+
+        raw_values = {
+            "h_start": float(h_start),
+            "h_end": float(h_end),
+            "s_min": int(s_min),
+            "s_max": int(s_max),
+            "v_min": int(v_min),
+            "v_max": int(v_max),
+        }
+
+        return {"hsv_ranges": hsv_ranges, "raw_values": raw_values}
+
+    @staticmethod
+    def get_advanced_hsv_ranges(h_start: float, h_end: float, s_min: int, s_max: int, v_min: int, v_max: int) -> list:
+        """高级模式：将 HSV 极值转换为 OpenCV 使用的范围"""
+        h_s, h_e = int(h_start / 2), int(h_end / 2)
+        s_s, s_e = int(s_min), int(s_max)
+        v_s, v_e = int(v_min), int(v_max)
+
+        if h_s <= h_e:
+            return [((h_s, s_s, v_s), (h_e, s_e, v_e))]
+        else:
+            return [((h_s, s_s, v_s), (180, s_e, v_e)), ((0, s_s, v_s), (h_e, s_e, v_e))]
+
+    @staticmethod
+    def calc_tolerance_from_ranges(
+        hex_str: str, h_start: float, h_end: float, s_min: float, s_max: float, v_min: float, v_max: float
+    ) -> int:
+        """反向推导：计算 HSV 的包围容差"""
+        import math
+
+        hc, sc, vc = ColorUtils.hex_to_hsv(hex_str)
+
+        # 计算各个维度与中心色的最大偏差
+        dist_h_start = min(abs(h_start - hc), 360.0 - abs(h_start - hc))
+        dist_h_end = min(abs(h_end - hc), 360.0 - abs(h_end - hc))
+        max_h_dist = max(dist_h_start, dist_h_end)
+
+        max_s_dist = max(abs(s_min - sc), abs(s_max - sc))
+        max_v_dist = max(abs(v_min - vc), abs(v_max - vc))
+
+        # 反推容差
+        t_h = (max_h_dist / 20.0) * 100.0
+        t_s = (max_s_dist / (255 * 0.6)) * 100.0
+        t_v = (max_v_dist / (255 * 0.75)) * 100.0
+
+        if t_h < 0.1:
+            t_h = 0.0
+        if t_s < 0.1:
+            t_s = 0.0
+        if t_v < 0.1:
+            t_v = 0.0
+
+        tolerance = int(math.ceil(max(t_h, t_s, t_v)))
+        return max(0, min(100, tolerance))

@@ -31,7 +31,8 @@ from definitions import PARAM_TRANSLATIONS
 from tools import KeyRecorder
 
 from ui_styles import UIColors, UIDims, UIFonts, UIStyles
-from ui_components import WidgetFactory, ToolboxList
+from ui_components import ToolboxList
+from ui_widgets import WidgetFactory
 
 
 # ============================================================
@@ -619,9 +620,24 @@ class DefaultSettingsWidget(QWidget):
         if not config:
             return
 
+        all_keys = list(config["params"].keys())
+
         for key, (data_type, current_default_val) in config["params"].items():
             # 跳过内部使用的参数
-            if key in ["link_id", "anchor_id", "collapsed", "region", "env_w", "env_h"]:
+            if key in [
+                "link_id",
+                "anchor_id",
+                "collapsed",
+                "region",
+                "env_w",
+                "env_h",
+                "h_start",
+                "h_end",
+                "s_min",
+                "s_max",
+                "v_min",
+                "v_max",
+            ]:
                 continue
 
             label_text = PARAM_TRANSLATIONS.get(key, f"{key}:")
@@ -662,19 +678,18 @@ class DefaultSettingsWidget(QWidget):
                 continue
 
             # 通用参数 —— 由工厂方法生成控件
-            widget = WidgetFactory.create_input_widget(
-                data_type,
-                current_default_val,
-                finish_callback=lambda *args, c=cmd_type, k=key: self._save_setting(c, k),
+            widget = WidgetFactory.create_widget(
+                key, data_type, current_default_val, all_keys, preview_mode=False, batch_edit_mode=True
             )
 
             if widget:
                 self.active_widgets[key] = widget
-                if isinstance(widget, QLineEdit) and "image" in key:
-                    widget.setPlaceholderText("默认图片文件名")
-                if isinstance(widget, QCheckBox):
-                    widget.setText("默认启用")
-                self.form_layout.addRow(label_text, widget)
+                widget.valueChanged.connect(lambda v, c=cmd_type, k=key: self._save_setting(c, k))
+
+                if key == "mode":
+                    self.form_layout.addRow(widget)
+                else:
+                    self.form_layout.addRow(label_text, widget)
 
     # ---- 按键录制 ----
 
@@ -698,7 +713,10 @@ class DefaultSettingsWidget(QWidget):
 
         widget = self.active_widgets[key]
         val = None
-        if isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+
+        if hasattr(widget, "get_value"):
+            val = widget.get_value()
+        elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
             val = widget.value()
         elif isinstance(widget, QLineEdit):
             val = widget.text()

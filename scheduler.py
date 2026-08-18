@@ -2,7 +2,6 @@
 # 脚本调度器：负责解析脚本步骤列表，按顺序执行指令，处理循环、条件分支、中断等控制流
 
 import time
-import threading
 import os
 from executor import ScriptExecutor, ExecutionEvent
 
@@ -40,8 +39,10 @@ class TaskScheduler:
             "group_end": self.executor.exec_group_end,
             "separator": self.executor.exec_separator,
             "if_start": self.executor.exec_if_start,
+            "if_color_start": self.executor.exec_if_color_start,
             "else_branch": self.executor.exec_else_branch,
             "if_end": self.executor.exec_if_end,
+            "if_color_end": self.executor.exec_if_end,
             "anchor": self.executor.exec_anchor,
             "jump": self.executor.exec_jump,
             "break_loop": self.executor.exec_break,
@@ -125,7 +126,7 @@ class TaskScheduler:
             # 查找 else_branch 时若先遇到 if_end，说明没有 else 分支
             if (
                 target_type == "else_branch"
-                and step.get("type") == "if_end"
+                and step.get("type") in ["if_end", "if_color_end"]
                 and step.get("params", {}).get("link_id") == link_id
             ):
                 return None
@@ -148,7 +149,7 @@ class TaskScheduler:
     #  主执行入口
     # ──────────────────────────────────────────────
 
-    def run_script(self, task_list, task_name, task_dir, run_times=1, timeout_sec=3600):
+    def run_script(self, task_list, task_name, task_dir, run_times=1, timeout_sec=36000):
         """
         执行脚本主循环
         :param task_list: 步骤列表
@@ -325,8 +326,11 @@ class TaskScheduler:
                             self.ctx["index"] += 1
 
                     # ── 条件判断开始 ──
-                    elif cmd_type == "if_start":
-                        condition_met = self.executor.exec_if_start(**params)
+                    elif cmd_type in ["if_start", "if_color_start"]:
+                        if cmd_type == "if_start":
+                            condition_met = self.executor.exec_if_start(**params)
+                        else:
+                            condition_met = self.executor.exec_if_color_start(**params)
 
                         if condition_met:  # 条件成立：顺序进入 if 体
                             self.ctx["index"] += 1
@@ -341,8 +345,9 @@ class TaskScheduler:
                                 self.ctx["index"] = else_index + 1
 
                             else:  # 没有 else 分支则跳到 if_end
+                                end_type = "if_end" if cmd_type == "if_start" else "if_color_end"
                                 end_index = self._find_target_node(
-                                    self.ctx["task_list"], self.ctx["index"], "if_end", link_id
+                                    self.ctx["task_list"], self.ctx["index"], end_type, link_id
                                 )
                                 if end_index is not None:
                                     self._emit(ExecutionEvent.DEBUG, f"跳过 If 模块 (跳转至行 {end_index + 1})")
@@ -355,6 +360,8 @@ class TaskScheduler:
                     elif cmd_type == "else_branch":
                         link_id = params.get("link_id")
                         end_index = self._find_target_node(self.ctx["task_list"], self.ctx["index"], "if_end", link_id)
+                        if end_index is None:
+                            end_index = self._find_target_node(self.ctx["task_list"], self.ctx["index"], "if_color_end", link_id)
                         if end_index is not None:
                             self.ctx["index"] = end_index + 1
                         else:

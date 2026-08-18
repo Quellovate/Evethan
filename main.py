@@ -5,7 +5,6 @@ import sys
 import os
 import json
 import time
-import uuid
 import threading
 import ctypes
 import platform
@@ -915,7 +914,7 @@ class ExecuteWidget(QWidget):
 
         self.spin_timeout = QSpinBox()
         self.spin_timeout.setRange(0, 999999)
-        self.spin_timeout.setValue(3600)
+        self.spin_timeout.setValue(36000)
         self.spin_timeout.setFixedWidth(160)
         self.spin_timeout.setToolTip("当前轮次执行超过该时间将强制中断并从头开始")
         self.spin_timeout.lineEdit().returnPressed.connect(self.spin_timeout.clearFocus)
@@ -1025,9 +1024,7 @@ class ExecuteWidget(QWidget):
         """刷新左侧任务列表（排除草稿任务）"""
         self.list_tasks.blockSignals(True)
         self.list_tasks.clear()
-        tasks = self.task_manager.get_all_tasks()
-        if TaskManager.DRAFT_TASK_NAME in tasks:
-            tasks.remove(TaskManager.DRAFT_TASK_NAME)
+        tasks = self.task_manager.get_display_tasks()
         self.list_tasks.addItems(tasks)
         # 恢复之前的选中状态
         if self.memory_task_name and self.memory_task_name in tasks:
@@ -1069,13 +1066,13 @@ class ExecuteWidget(QWidget):
     def load_run_settings(self, task_dir):
         """从任务文件夹中读取上次的运行次数和超时设置"""
         settings_path = os.path.join(task_dir, "run_settings.json")
-        times, timeout = 1, 3600
+        times, timeout = 1, 36000
         if os.path.exists(settings_path):
             try:
                 with open(settings_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     times = data.get("run_times", 1)
-                    timeout = data.get("timeout_sec", 3600)
+                    timeout = data.get("timeout_sec", 36000)
             except Exception as e:
                 print(f"读取任务运行配置失败: {e}")
         # 阻塞信号防止触发 save
@@ -1216,6 +1213,10 @@ class ExecuteWidget(QWidget):
         self.spin_timeout.setEnabled(False)
         self.log_area.setFocus()
 
+        # 清空旧图片缓存
+        if hasattr(self.scheduler.executor.target, "clear_cache"):
+            self.scheduler.executor.target.clear_cache()
+
         t = threading.Thread(
             target=self._thread_runner, args=(script_data, task_name, task_dir, run_times, timeout_sec)
         )
@@ -1354,9 +1355,7 @@ class ManageTaskWidget(QWidget):
     def refresh_list(self):
         """刷新已有任务列表"""
         self.list_tasks.clear()
-        tasks = self.task_manager.get_all_tasks()
-        if TaskManager.DRAFT_TASK_NAME in tasks:
-            tasks.remove(TaskManager.DRAFT_TASK_NAME)
+        tasks = self.task_manager.get_display_tasks()
         self.list_tasks.addItems(tasks)
 
     def create_task(self):

@@ -5,8 +5,6 @@ import sys
 import os
 import ctypes
 import platform
-import numpy as np
-import cv2
 
 # Windows 下设置 DPI 感知，避免高分屏缩放导致坐标不准
 if platform.system() == "Windows":
@@ -570,7 +568,7 @@ class ColorResultDialog(QDialog):
         self.val_label.setFont(UIFonts.app_default())
         self.val_label.setStyleSheet(f"color: {UIColors.Semantic.TEXT_PRIMARY};")
 
-        lbl_slider = QLabel("调节亮度(V):")
+        lbl_slider = QLabel("调节明度(V):")
         lbl_slider.setFont(UIFonts.app_default())
         lbl_slider.setStyleSheet(f"color: {UIColors.Semantic.TEXT_PRIMARY};")
 
@@ -584,74 +582,56 @@ class ColorResultDialog(QDialog):
         layout.addWidget(self.img_label, 1)
         layout.addLayout(slider_layout)
 
-        self.slider.valueChanged.connect(self._generate_base_image)
-        self._H = None
-        self._S = None
-
+        self.slider.valueChanged.connect(self._generate_gradient_preview)
+        self._h_start = self._h_end = self._s_min = self._s_max = 0
         self.process_samples(samples)
 
     def process_samples(self, samples):
         """计算极值，转换色彩空间，生成预览图"""
-        arr_rgb = np.array(samples)
-        rmin, gmin, bmin = arr_rgb.min(axis=0)
-        rmax, gmax, bmax = arr_rgb.max(axis=0)
-        r_mean, g_mean, b_mean = arr_rgb.mean(axis=0)
-        hex_code = f"#{int(r_mean):02X}{int(g_mean):02X}{int(b_mean):02X}"
+        stats = ColorUtils.analyze_samples(samples)
 
-        arr_hsv = ColorUtils.rgb_to_hsv_cv2(arr_rgb)
-        hues = arr_hsv[:, 0]
-        svals = arr_hsv[:, 1] * 255.0
-        vvals = arr_hsv[:, 2] * 255.0
-
-        h_lo, h_hi = ColorUtils.hsv_circular_min_interval(hues)
-        smin, smax = svals.min(), svals.max()
-        vmin, vmax = vvals.min(), vvals.max()
+        r_min, g_min, b_min = stats["rgb_min"]
+        r_max, g_max, b_max = stats["rgb_max"]
+        h_start, s_min, v_min = stats["hsv_min"]
+        h_end, s_max, v_max = stats["hsv_max"]
+        hex_code = stats["hex_code"]
 
         txt = (
             f"<table width='100%' style='color: {UIColors.Semantic.TEXT_PRIMARY};'>"
             f"  <tr>"
             f"    <td width='50%' valign='top'>"
             f"      <b>RGB 范围</b><br><br>"
-            f"      R: [{rmin}, {rmax}]<br>"
-            f"      G: [{gmin}, {gmax}]<br>"
-            f"      B: [{bmin}, {bmax}]<br><br>"
+            f"      R: [{r_min}, {r_max}]<br>"
+            f"      G: [{g_min}, {g_max}]<br>"
+            f"      B: [{b_min}, {b_max}]<br><br>"
             f"      <b>中心色值:</b> {hex_code} "
             f"      <span style='background-color: {hex_code}; border: 1px solid {UIColors.Semantic.BORDER_DEFAULT};'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>"
             f"    </td>"
             f"    <td width='50%' valign='top'>"
             f"      <b>HSV 范围</b><br><br>"
-            f"      H: [{h_lo:.1f}°, {h_hi:.1f}°]<br>"
-            f"      S: [{int(smin)}, {int(smax)}]<br>"
-            f"      V: [{int(vmin)}, {int(vmax)}]"
+            f"      H: [{h_start:.1f}°, {h_end:.1f}°]<br>"
+            f"      S: [{int(s_min)}, {int(s_max)}]<br>"
+            f"      V: [{int(v_min)}, {int(v_max)}]"
             f"    </td>"
             f"  </tr>"
             f"</table>"
         )
         self.info_label.setText(txt)
 
-        if h_hi < h_lo:
-            h_hi += 360.0
-        h_arr = (np.linspace(h_lo, h_hi, 200) % 360.0) / 360.0
-        s_arr = np.linspace(smax, smin, 100) / 255.0
-        self._H, self._S = np.meshgrid(h_arr, s_arr)
+        self._h_start, self._h_end = h_start, h_end
+        self._s_min, self._s_max = s_min, s_max
 
         self.slider.blockSignals(True)
-        self.slider.setRange(int(vmin), int(vmax))
-        self.slider.setValue(int(vmax))
+        self.slider.setRange(int(v_min), int(v_max))
+        self.slider.setValue(int(v_max))
         self.slider.blockSignals(False)
-        self._generate_base_image(int(vmax))
+        self._generate_gradient_preview(int(v_max))
 
-    def _generate_base_image(self, v_val):
+    def _generate_gradient_preview(self, v_val):
         """根据 V 值动态生成预览图"""
-        if self._H is None:
-            return
         self.val_label.setText(f"V: {v_val}")
+        img_data = ColorUtils.generate_hsv_gradient_matrix(self._h_start, self._h_end, self._s_min, self._s_max, v_val)
 
-        V = np.full_like(self._H, v_val / 255.0)
-        hsv_image = np.dstack((self._H * 360.0, self._S, V)).astype(np.float32)
-        rgb_image = cv2.cvtColor(hsv_image, cv2.COLOR_HSV2RGB)
-
-        img_data = (rgb_image * 255).astype(np.uint8)
         h, w, ch = img_data.shape
         qimg = QImage(img_data.data, w, h, ch * w, QImage.Format_RGB888).copy()
 

@@ -4,6 +4,8 @@ import os
 import random
 import time
 import math
+import cv2
+import numpy as np
 
 from typing import Tuple
 
@@ -41,6 +43,7 @@ class TargetDriver:
 
     def __init__(self, max_cache_size=100):
         self._image_cache = OrderedDict()  # LRU 图片模板缓存
+        self._color_buffers = {}  # 预分配 OpenCV 内存
         self.max_cache_size = max_cache_size
         Utils.init_dxcam()
 
@@ -158,7 +161,7 @@ class TargetDriver:
                             break
 
                     # === 第三层：缩小图上用 Canny 边缘匹配 ===
-                    if not best_candidate and cache_data["canny_small"] is not None:
+                    if not best_candidate and cache_data["canny_small"] is not None and confidence <= 0.8:
                         tier3_conf = confidence * 0.80
                         screen_canny_small = Utils.get_canny_edge(screen_small)
                         res_s = Utils.match_template(screen_canny_small, cache_data["canny_small"], tier3_conf)
@@ -201,7 +204,7 @@ class TargetDriver:
                             break
 
                     # Canny 边缘匹配
-                    if not match_result and cache_data["canny"] is not None:
+                    if not match_result and cache_data["canny"] is not None and confidence <= 0.8:
                         tier3_conf = confidence * 0.85
                         screen_canny = Utils.get_canny_edge(screen_img)
                         res = Utils.match_template(screen_canny, cache_data["canny"], tier3_conf)
@@ -216,6 +219,58 @@ class TargetDriver:
             return Utils.get_gaussian_offset(final_x, final_y, random_range)
 
         return None
+
+    def get_color_match_count(self, hsv_ranges, region=None, env_w=0, env_h=0):
+        """获取指定区域内，符合 HSV 容差范围的像素数量"""
+        # 计算缩放比例与区域
+        _, current_h = Utils.get_screen_size()
+        base_ratio = (current_h / env_h) if env_h > 0 else 1.0
+        search_region = None
+        if region and len(region) == 4 and (region[2] > 0 or region[3] > 0):
+            rx = int(region[0] * base_ratio)
+            ry = int(region[1] * base_ratio)
+            rw = int(region[2] * base_ratio)
+            rh = int(region[3] * base_ratio)
+            search_region = (rx, ry, rw, rh)
+
+        screen_img = Utils.grab_screen(region=search_region)
+        if screen_img is None:
+            return 0
+
+        # 内存预分配
+        shape = screen_img.shape[:2]
+        if shape not in self._color_buffers:
+            if len(self._color_buffers) > 5:
+                self._color_buffers.clear()
+            hsv_buf = np.empty((shape[0], shape[1], 3), dtype=np.uint8)
+            mask_buf1 = np.empty((shape[0], shape[1]), dtype=np.uint8)
+            mask_buf2 = np.empty((shape[0], shape[1]), dtype=np.uint8)
+            self._color_buffers[shape] = (hsv_buf, mask_buf1, mask_buf2)
+
+        hsv_buf, mask_buf1, mask_buf2 = self._color_buffers[shape]
+
+        # BGR 转 HSV
+        cv2.cvtColor(screen_img, cv2.COLOR_BGR2HSV, dst=hsv_buf)
+
+        total_pixels = 0
+        if len(hsv_ranges) == 1:
+            lower = np.array(hsv_ranges[0][0], dtype=np.uint8)
+            upper = np.array(hsv_ranges[0][1], dtype=np.uint8)
+            cv2.inRange(hsv_buf, lower, upper, dst=mask_buf1)
+            total_pixels = cv2.countNonZero(mask_buf1)
+        elif len(hsv_ranges) == 2:
+            lower1 = np.array(hsv_ranges[0][0], dtype=np.uint8)
+            upper1 = np.array(hsv_ranges[0][1], dtype=np.uint8)
+            cv2.inRange(hsv_buf, lower1, upper1, dst=mask_buf1)
+
+            lower2 = np.array(hsv_ranges[1][0], dtype=np.uint8)
+            upper2 = np.array(hsv_ranges[1][1], dtype=np.uint8)
+            cv2.inRange(hsv_buf, lower2, upper2, dst=mask_buf2)
+
+            cv2.bitwise_or(mask_buf1, mask_buf2, dst=mask_buf1)
+            total_pixels = cv2.countNonZero(mask_buf1)
+
+        return total_pixels
 
 
 class ActionDriver:

@@ -2,7 +2,8 @@
 # UI 样式定义模块：集中管理应用的颜色、字体、尺寸和 QSS 样式表
 
 
-from PySide6.QtGui import QColor, QFont, Qt
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QFont
 
 
 # ═══════════════════════════════════════════════════════════
@@ -520,7 +521,7 @@ class UIStyles:
     # SpinBox / ComboBox 全局样式
     APP_SPINBOX = f"""
         QSpinBox, QDoubleSpinBox, QComboBox {{
-            padding: 4px 26px 4px 8px; min-height: 28px;
+            padding: 4px 0px 4px 0px; min-height: 28px;
             border: 1px solid {S.BORDER_DEFAULT}; border-radius: 4px;
             background: {S.BG_SURFACE}; color: {S.TEXT_PRIMARY};
         }}

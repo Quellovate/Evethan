@@ -5,7 +5,7 @@ import random
 import time
 import os
 from driver import TargetDriver, ActionDriver
-from utils import Utils
+from utils import Utils, ColorUtils
 from config import global_config
 
 
@@ -565,6 +565,55 @@ class ScriptExecutor:
                 return False
             time.sleep(0.05)
 
+    def exec_if_color_start(
+        self,
+        center_hex,
+        tolerance=20,
+        min_pixels=10,
+        timeout=5.0,
+        link_id=None,
+        region=None,
+        env_w=0,
+        env_h=0,
+        mode="basic",
+        **kwargs,
+    ):
+        """条件判断：在超时时间内找色，找到像素数达标返回True，否则False"""
+        region_str = (
+            f"区域:{region}" if (region and isinstance(region, list) and (region[2] > 0 or region[3] > 0)) else "全屏"
+        )
+        self._emit(
+            ExecutionEvent.STEP_START, f"找色: {center_hex}，需:{min_pixels}px", {"hex": center_hex, "timeout": timeout}
+        )
+        start_time = time.time()
+        if mode == "basic":
+            ranges = ColorUtils.get_basic_hsv_ranges(center_hex, tolerance)
+            hsv_ranges = ranges["hsv_ranges"]
+        else:
+            hsv_ranges = ColorUtils.get_advanced_hsv_ranges(
+                kwargs.get("h_start", 0.0),
+                kwargs.get("h_end", 360.0),
+                kwargs.get("s_min", 0),
+                kwargs.get("s_max", 255),
+                kwargs.get("v_min", 0),
+                kwargs.get("v_max", 255),
+            )
+
+        while True:
+            if self._is_stopped():
+                return False
+
+            count = self.target.get_color_match_count(hsv_ranges, region=region, env_w=env_w, env_h=env_h)
+            if count >= min_pixels:
+                self._emit(ExecutionEvent.RESULT, f"条件成立，找到 {count} 像素")
+                return True
+
+            if time.time() - start_time > timeout:
+                self._emit(ExecutionEvent.RESULT, f"条件不成立，仅找到 {count} 像素")
+                return False
+
+            time.sleep(0.005)
+
     def exec_else_branch(self, link_id=None):
         """进入Else分支"""
         self._emit(ExecutionEvent.DEBUG, "进入 Else 分支")
@@ -602,6 +651,9 @@ class ScriptExecutor:
             self._emit(ExecutionEvent.WARNING, "正在强制清理并复位残留的鼠标与键盘按下状态...")
             self.action.release_all_hardware_and_software_holds()
             self._hold_links.clear()
+
+        if hasattr(self.target, "clear_cache"):
+            self.target.clear_cache()
 
     def exec_stop_task(self):
         """终止整个任务"""

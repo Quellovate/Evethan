@@ -9,30 +9,16 @@ import time
 import uuid
 from collections import deque
 
-from PySide6.QtCore import QKeyCombination, QMimeData, QPoint, QRect, QSize, Qt, Signal, QTimer
-from PySide6.QtGui import (
-    QAction,
-    QBrush,
-    QColor,
-    QCursor,
-    QDrag,
-    QFont,
-    QIcon,
-    QKeySequence,
-    QPen,
-    QShortcut,
-    QPixmap,
-    QPainter,
-)
+from PySide6.QtCore import QEvent, QKeyCombination, QMimeData, QPoint, QRect, QSize, Qt, QTimer, Signal
+
+from PySide6.QtGui import QBrush, QCursor, QDrag, QKeySequence, QPainter, QPen, QPixmap, QShortcut
+
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
     QCheckBox,
-    QComboBox,
-    QDoubleSpinBox,
     QFormLayout,
     QFrame,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -42,8 +28,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
-    QSpinBox,
-    QSplitter,
+    QSizePolicy,
     QStyle,
     QStyledItemDelegate,
     QStyleOptionButton,
@@ -52,10 +37,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+
 from config import global_config
 from definitions import PARAM_TRANSLATIONS, DISPLAY_NAME_OVERRIDE
-from tools import KeyRecorder, ScreenTool
+from tools import KeyRecorder, ScreenTool, ColorPickerTool
 from ui_styles import UIColors, UIDims, UIStyles, UIFonts
+from utils import ColorUtils
+from ui_widgets import WidgetFactory, ButtonParamWidget, AnchorComboBox, RegionSelector, KeyInputWidget, HueRangeSlider
 
 
 # ============================================================
@@ -74,40 +62,6 @@ def get_traits(cmd_type):
 def get_ui_bg(cmd_type):
     """获取指令的 UI 背景"""
     return get_cmd_config(cmd_type).get("ui_bg", "normal")
-
-
-# ============================================================
-#  通用工厂：根据数据类型创建对应的输入控件
-# ============================================================
-class WidgetFactory:
-    """根据参数的数据类型，自动创建 QSpinBox / QLineEdit / QCheckBox 等控件"""
-
-    @staticmethod
-    def create_input_widget(data_type, value, finish_callback=None):
-        widget = None
-        if data_type == int:
-            widget = QSpinBox()
-            widget.setRange(-9999, 9999)
-            widget.setValue(int(value))
-            if finish_callback:
-                widget.editingFinished.connect(finish_callback)
-        elif data_type == float:
-            widget = QDoubleSpinBox()
-            widget.setRange(0.0, 9999.0)
-            widget.setSingleStep(0.1)
-            widget.setValue(float(value))
-            if finish_callback:
-                widget.editingFinished.connect(finish_callback)
-        elif data_type == str:
-            widget = QLineEdit(str(value))
-            if finish_callback:
-                widget.editingFinished.connect(finish_callback)
-        elif data_type == bool:
-            widget = QCheckBox("启用")
-            widget.setChecked(bool(value))
-            if finish_callback:
-                widget.clicked.connect(finish_callback)
-        return widget
 
 
 # ============================================================
@@ -420,7 +374,7 @@ class ToolboxList(QListWidget):
             ),
             ("键盘操作", ["key_press", "key_long_press", "key_hold_start"]),
             ("流程控制", ["wait", "find_image", "anchor", "jump", "break_loop", "stop_task"]),
-            ("结构模块", ["loop_start", "if_start", "else_branch", "group_start", "separator"]),
+            ("结构模块", ["loop_start", "if_start", "if_color_start", "else_branch", "group_start", "separator"]),
         ]
         self.populate_tools()
 
@@ -500,7 +454,7 @@ class SubtaskList(QListWidget):
     def populate_tasks(self):
         """刷新列表"""
         self.clear()
-        tasks = self.task_manager.get_all_tasks()
+        tasks = self.task_manager.get_display_tasks()
         # 过滤草稿任务
         if self.task_manager.DRAFT_TASK_NAME in tasks:
             tasks.remove(self.task_manager.DRAFT_TASK_NAME)
@@ -804,41 +758,18 @@ class ScriptTimeline(QListWidget):
         label = DISPLAY_NAME_OVERRIDE.get(cmd_type, full_config.get(cmd_type, {}).get("label", cmd_type))
         self.history_mgr.create_snapshot(f"在第 {insert_row_idx} 行添加 [{label}]")
         # 成对结构（循环/分组/判断）的特殊处理
-        if cmd_type == "loop_start" and data is None:
-            self.add_paired_module(insert_row_idx - 1, "loop")
-        elif cmd_type == "group_start" and data is None:
-            self.add_paired_module(insert_row_idx - 1, "group")
-        elif cmd_type == "if_start" and data is None:
-            self.add_paired_module(insert_row_idx - 1, "if")
-        elif cmd_type == "mouse_hold_start" and data is None:
-            self.add_paired_module(insert_row_idx - 1, "mouse_hold")
-        elif cmd_type == "key_hold_start" and data is None:
-            self.add_paired_module(insert_row_idx - 1, "key_hold")
+        traits = get_traits(cmd_type)
+        if data is None and "start" in traits:
+            self.add_paired_module(insert_row_idx - 1, cmd_type)
         else:
             self._insert_cmd_at(insert_row_idx - 1, cmd_type, data)
 
-    def add_paired_module(self, row, mode="loop"):
+    def add_paired_module(self, row, cmd_type):
         """插入成对的开始/结束标记（循环、分组、条件判断），共享 link_id"""
-        full_config = global_config.get_config()
-        link_id = str(uuid.uuid4())[:8]
-        start_type = f"{mode}_start"
-        end_type = f"{mode}_end"
-        start_data = {
-            "type": start_type,
-            "desc": full_config[start_type]["label"],
-            "params": {k: v[1] for k, v in full_config[start_type]["params"].items()},
-            "checked": False,
-        }
-        start_data["params"]["link_id"] = link_id
-        end_data = {
-            "type": end_type,
-            "desc": full_config[end_type]["label"],
-            "params": {k: v[1] for k, v in full_config[end_type]["params"].items()},
-            "checked": False,
-        }
-        end_data["params"]["link_id"] = link_id
-        self._insert_cmd_at(row, start_data)
-        self._insert_cmd_at(row + 1, end_data)
+        paired_data = self._create_paired_data(cmd_type)
+        for i, data in enumerate(paired_data):
+            self._insert_cmd_at(row + i, data)
+
         self.setCurrentRow(row)
         self.on_item_clicked(self.item(row))
 
@@ -954,6 +885,15 @@ class ScriptTimeline(QListWidget):
             self._interaction_mode = "standard"
             super().mousePressEvent(event)
 
+    def viewportEvent(self, event):
+        """拦截 Qt 悬停事件，防止软校验错误提示消失"""
+        if event.type() == QEvent.ToolTip:
+            pos = event.pos()
+            item = self.itemAt(pos)
+            if item and item.data(Qt.UserRole).get("_error", ""):
+                return True
+        return super().viewportEvent(event)
+
     def mouseMoveEvent(self, event):
         """鼠标移动：根据交互模式执行拖拽或滑动勾选"""
 
@@ -962,7 +902,7 @@ class ScriptTimeline(QListWidget):
 
         if self._last_error_item:
             try:
-                _ = self._last_error_item.listWidget() 
+                _ = self._last_error_item.listWidget()
             except RuntimeError:
                 self._last_error_item = None
                 QToolTip.hideText()
@@ -974,7 +914,9 @@ class ScriptTimeline(QListWidget):
                 if self._last_error_item != item:
                     row_idx = self.row(item) + 1
                     detail_msg = f"⚠️ [第 {row_idx} 行] {error_msg}"
-                    QToolTip.showText(event.globalPosition().toPoint(), detail_msg, self)
+                    item_rect = self.visualItemRect(item)
+
+                    QToolTip.showText(event.globalPosition().toPoint(), detail_msg, self, item_rect, 60000)
                     self._last_error_item = item
             else:
                 if self._last_error_item:
@@ -1033,16 +975,19 @@ class ScriptTimeline(QListWidget):
         item.setData(Qt.UserRole, data)
         cmd_type = data.get("type", "")
         link_id = data.get("params", {}).get("link_id")
+        traits = get_traits(cmd_type)
 
-        if link_id and ("_start" in cmd_type or "_end" in cmd_type):
+        if link_id and ("start" in traits or "end" in traits):
             start_row, end_row = -1, -1
             # 找出此 link_id 对应的起点和终点行号
             for i in range(self.count()):
                 d = self.item(i).data(Qt.UserRole)
                 if d.get("params", {}).get("link_id") == link_id:
-                    if "_start" in d.get("type", ""):
+                    t = d.get("type", "")
+                    t_traits = get_traits(t)
+                    if "start" in t_traits:
                         start_row = i
-                    if "_end" in d.get("type", ""):
+                    if "end" in t_traits:
                         end_row = i
             # 同步包围区间内所有指令状态
             if start_row != -1 and end_row != -1:
@@ -1276,17 +1221,9 @@ class ScriptTimeline(QListWidget):
         # 构建待插入的数据
         if not is_valid_list:
             cmd_type = mime_text
-            if cmd_type == "loop_start":
-                items_to_insert = self._create_paired_data("loop")
-            elif cmd_type == "group_start":
-                items_to_insert = self._create_paired_data("group")
-            elif cmd_type == "if_start":
-                items_to_insert = self._create_paired_data("if")
-            elif cmd_type == "mouse_hold_start":
-                items_to_insert = self._create_paired_data("mouse_hold")
-            elif cmd_type == "key_hold_start":
-                items_to_insert = self._create_paired_data("key_hold")
-
+            traits = get_traits(cmd_type)
+            if "start" in traits:
+                items_to_insert = self._create_paired_data(cmd_type)
             else:
                 items_to_insert = [self._create_single_data(cmd_type)]
         else:
@@ -1316,14 +1253,19 @@ class ScriptTimeline(QListWidget):
             data["params"]["anchor_id"] = str(uuid.uuid4())[:8]
         return data
 
-    def _create_paired_data(self, mode):
+    def _create_paired_data(self, cmd_type):
         """创建成对的 start/end 数据字典列表"""
         link_id = str(uuid.uuid4())[:8]
-        start = self._create_single_data(f"{mode}_start")
-        start["params"]["link_id"] = link_id
-        end = self._create_single_data(f"{mode}_end")
-        end["params"]["link_id"] = link_id
-        return [start, end]
+        start_data = self._create_single_data(cmd_type)
+        start_data["params"]["link_id"] = link_id
+        end_type = cmd_type.replace("_start", "_end")
+        end_traits = get_traits(end_type)
+        if "end" in end_traits:
+            end_data = self._create_single_data(end_type)
+            end_data["params"]["link_id"] = link_id
+            return [start_data, end_data]
+        else:
+            return [start_data]
 
     # -------------------- 结构验证 --------------------
 
@@ -1418,7 +1360,7 @@ class ScriptTimeline(QListWidget):
         self.insertItem(target_row, self.takeItem(current_row))
         self.setCurrentRow(target_row)
         self.refresh_ui()
-        self._soft_validate_structure(self.get_all_data())
+        self._soft_validate_structure()
         self._scroll_to(target_row, orig_scroll)
 
     # -------------------- 键盘快捷键 --------------------
@@ -1550,18 +1492,20 @@ class ScriptTimeline(QListWidget):
         data = item.data(Qt.UserRole)
         cmd_type = data.get("type", "")
         link_id = data.get("params", {}).get("link_id")
+        traits = get_traits(cmd_type)
 
         # 只有结构模块（含 link_id 且是 start/end）才触发
-        if link_id and ("_start" in cmd_type or "_end" in cmd_type):
+        if link_id and ("start" in traits or "end" in traits):
             start_idx, end_idx = -1, -1
             # 查找这对 link_id 的起点和终点
             for i in range(self.count()):
                 d = self.item(i).data(Qt.UserRole)
                 if d.get("params", {}).get("link_id") == link_id:
                     t = d.get("type", "")
-                    if "_start" in t:
+                    t_traits = get_traits(t)
+                    if "start" in t_traits:
                         start_idx = i
-                    if "_end" in t:
+                    if "end" in t_traits:
                         end_idx = i
 
             if start_idx != -1 and end_idx != -1:
@@ -1637,6 +1581,10 @@ class PropertyEditor(QWidget):
 
     def clear_panel(self):
         """清空面板中所有控件"""
+        for widget in self.active_widgets.values():
+            if isinstance(widget, QWidget):
+                widget.deleteLater()
+        self.active_widgets.clear()
         while self.layout.count():
             child = self.layout.takeAt(0)
             if child.widget():
@@ -1667,20 +1615,21 @@ class PropertyEditor(QWidget):
 
     # -------------------- 控件渲染 --------------------
 
-    def _render_widgets(self, data_dict, preview_mode=False):
-        """根据指令数据和配置，动态生成所有参数编辑控件"""
-        config = global_config.get_config().get(data_dict["type"])
+    def _render_widgets(self, cmd_data, preview_mode=False):
+        """根据指令数据和配置，动态装配所有参数编辑控件"""
+        config = global_config.get_config().get(cmd_data["type"])
         if not config:
             return
-        cmd_type = data_dict.get("type", "")
+
+        cmd_type = cmd_data.get("type", "")
         original_name = DISPLAY_NAME_OVERRIDE.get(cmd_type, config["label"])
+        all_keys = list(config["params"].keys())
 
         # 指令类型（只读）
-        type_display = QLabel(original_name)
-        self.layout.addRow("指令类型:", type_display)
+        self.layout.addRow("指令类型:", QLabel(original_name))
 
         # 备注说明
-        desc_edit = QLineEdit(data_dict.get("desc", ""))
+        desc_edit = QLineEdit(cmd_data.get("desc", ""))
         if not preview_mode:
             desc_edit.editingFinished.connect(lambda: self.update_desc(desc_edit.text()))
         else:
@@ -1688,185 +1637,202 @@ class PropertyEditor(QWidget):
         self.layout.addRow("备注说明:", desc_edit)
         self.active_widgets["_desc_input"] = desc_edit
 
-        keys = config["params"].keys()
-
         # 遍历每个参数，生成对应控件
         for key, (data_type, default_val) in config["params"].items():
             # 跳过内部参数
-            if key in ["link_id", "collapsed", "env_w", "env_h"]:
+            if key in ["link_id", "collapsed", "env_w", "env_h", "h_end", "s_max", "v_max"]:
                 continue
-            val = data_dict["params"].get(key, default_val)
+
+            val = cmd_data["params"].get(key, default_val)
             label_text = PARAM_TRANSLATIONS.get(key, f"{key}:")
 
             # --- 子任务调用控件 ---
             if key in ["task_id", "task_name"]:
-                widget = QLineEdit(str(val))
-                widget.setReadOnly(True)
-                self.active_widgets[key] = widget
-                self.layout.addRow(label_text, widget)
+                le = QLineEdit(str(val))
+                le.setReadOnly(True)
+                self.active_widgets[key] = le
+                self.layout.addRow(label_text, le)
                 continue
 
-            # --- 鼠标按键下拉框 ---
-            if key == "button":
-                widget = QComboBox()
-                widget.addItems(["left", "right", "middle"])
-                current_btn = str(val).lower()
-                if current_btn not in ["left", "right", "middle"]:
-                    current_btn = "left"
-                widget.setCurrentText(current_btn)
-                if not preview_mode:
-                    widget.currentTextChanged.connect(lambda v, k=key: self.update_param_from_widget(k))
-                else:
-                    widget.setEnabled(False)
-                self.active_widgets[key] = widget
-                self.layout.addRow(label_text, widget)
+            # --- HSV 范围复合控件 ---
+            if key in ["h_start", "s_min", "v_min"]:
+                self._render_hsv_range_row(cmd_type, key, cmd_data, preview_mode)
                 continue
 
-            # --- 区域选择控件 ---
-            if key == "region":
-                container = QWidget()
-                h_layout = QHBoxLayout(container)
-                h_layout.setContentsMargins(0, 0, 0, 0)
-                h_layout.setSpacing(5)
-                display_str = (
-                    f"X:{val[0]} Y:{val[1]} {val[2]}x{val[3]}"
-                    if isinstance(val, list) and len(val) == 4 and (val[2] > 0 or val[3] > 0)
-                    else "全屏 (自动)"
-                )
-                line_display = QLineEdit(display_str)
-                line_display.setReadOnly(True)
-                line_display.setStyleSheet(UIStyles.READONLY_INPUT)
-                btn_select = QPushButton("框选")
-                btn_select.setCursor(Qt.PointingHandCursor)
-                btn_select.setStyleSheet(UIStyles.BTN_ACTION_BLUE)
-                btn_reset = QPushButton("重置")
-                btn_reset.setCursor(Qt.PointingHandCursor)
-                btn_reset.setStyleSheet(UIStyles.BTN_ACTION_RED)
-                if not preview_mode:
-                    btn_select.clicked.connect(self.open_region_selector)
-                    btn_reset.clicked.connect(self.reset_region_to_fullscreen)
-                else:
-                    btn_select.setEnabled(False)
-                    btn_reset.setEnabled(False)
-                h_layout.addWidget(line_display)
-                h_layout.addWidget(btn_select)
-                h_layout.addWidget(btn_reset)
-                self.layout.addRow(label_text, container)
+            # --- 标准/复合控件 ---
+            widget = WidgetFactory.create_widget(key, data_type, val, all_keys, preview_mode)
+            if not widget:
                 continue
+            self.active_widgets[key] = widget
 
-            # --- 跳转目标锚点控件 ---
-            if key == "target_id":
-                widget = QComboBox()
-                widget.setEditable(True)
-                widget.setFixedHeight(desc_edit.sizeHint().height())
-                widget.setStyleSheet(UIStyles.COMBOBOX_EDITABLE)
+            # --- 依赖注入 ---
+            if isinstance(widget, AnchorComboBox):
+                widget.set_anchor_options(self._get_all_anchors())
+                desc_h = self.active_widgets["_desc_input"].sizeHint().height()
+                widget.combo.setFixedHeight(desc_h)
 
-                # 提取当前指令参数已保存的 ID
-                raw_id = str(val).split()[0] if str(val).strip() else ""
-                display_text = str(val)
-
-                # 获取任务中已有的所有锚点信息
-                anchor_options = []
-                if self.current_item and self.current_item.listWidget():
-                    all_data = self.current_item.listWidget().get_all_data()
-                    for i, step in enumerate(all_data):
-                        if step.get("type") == "anchor":
-                            a_id = step.get("params", {}).get("anchor_id", "")
-                            a_desc = step.get("desc", "")
-                            if a_id:
-                                rich_text = f"{a_id}  [行{i + 1}] {a_desc}"
-                                anchor_options.append(rich_text)
-                                if a_id == raw_id:
-                                    display_text = rich_text
-
-                # 如果锚点的位置或备注发生过改动，自动更新跳转指令的底层数据
-                if display_text != str(val):
-                    self.current_data["params"][key] = display_text
-                    if self.current_item:
-                        self.current_item.setData(Qt.UserRole, self.current_data)
-
-                widget.addItems(anchor_options)
-                widget.setCurrentText(str(val))
-
-                if not preview_mode:
-                    widget.lineEdit().editingFinished.connect(
-                        lambda w=widget, k=key: self._handle_target_id_input(w, k)
-                    )
-                    widget.activated.connect(lambda idx, k=key: self.update_param_from_widget(k))
-                else:
-                    widget.setEnabled(False)
-
-                self.active_widgets[key] = widget
-                self.layout.addRow(label_text, widget)
-                continue
-
-            # --- 通用控件（由工厂创建） ---
-            finish_cb = None if preview_mode else lambda v=None, k=key: self.update_param_from_widget(k)
-            widget = WidgetFactory.create_input_widget(data_type, val, finish_callback=finish_cb)
-            if widget:
-                self.active_widgets[key] = widget
-                if key == "anchor_id" and isinstance(widget, QLineEdit):
-                    widget.setReadOnly(True)
-
-                traits = get_traits(cmd_type)
-
-                # 按键录制控件：附带录制按钮
-                if key == "key_code" and "key_record" in traits:
-                    container = QWidget()
-                    h_layout = QHBoxLayout(container)
-                    h_layout.setContentsMargins(0, 0, 0, 0)
-                    h_layout.setSpacing(5)
-                    if isinstance(widget, QLineEdit):
-                        widget.setPlaceholderText("例如: ctrl+c")
-                    btn_record = QPushButton("录制")
-                    btn_record.setCursor(Qt.PointingHandCursor)
-                    btn_record.setStyleSheet(UIStyles.BTN_ACTION_GREEN)
-                    btn_record.clicked.connect(lambda _, w=widget: self.open_key_recorder(w))
-                    if preview_mode:
-                        btn_record.setEnabled(False)
-                    h_layout.addWidget(widget)
-                    h_layout.addWidget(btn_record)
-                    self.layout.addRow(label_text, container)
-                else:
-                    if isinstance(widget, QLineEdit) and "image" in key:
-                        widget.setPlaceholderText("请输入文件名")
-                    if preview_mode:
-                        widget.setEnabled(False)
-                    self.layout.addRow(label_text, widget)
-
-            # --- 辅助按钮（仅编辑模式） ---
+            # --- 保存信号 ---
             if not preview_mode:
-                if key == "image_path" and self.task_root_path:
-                    btn_shot = QPushButton("快捷截图")
-                    btn_shot.setStyleSheet(UIStyles.BTN_ACTION_ORANGE)
-                    btn_shot.clicked.connect(self.open_screenshot_tool)
-                    self.layout.addRow(btn_shot)
-                elif key == "y" and "x" in keys:
-                    btn_pick = QPushButton("快捷填入坐标")
-                    btn_pick.setStyleSheet(UIStyles.BTN_ACTION_BLUE)
-                    btn_pick.clicked.connect(lambda: self.open_locator("x", "y"))
-                    self.layout.addRow(btn_pick)
-                elif key == "y1" and "x1" in keys:
-                    btn_pick_start = QPushButton("快捷填入起点")
-                    btn_pick_start.setStyleSheet(UIStyles.BTN_ACTION_BLUE)
-                    btn_pick_start.clicked.connect(lambda: self.open_locator("x1", "y1"))
-                    self.layout.addRow(btn_pick_start)
-                elif key == "y2" and "x2" in keys:
-                    btn_pick_end = QPushButton("快捷填入终点")
-                    btn_pick_end.setStyleSheet(UIStyles.BTN_ACTION_BLUE)
-                    btn_pick_end.clicked.connect(lambda: self.open_locator("x2", "y2"))
-                    self.layout.addRow(btn_pick_end)
-                elif key == "off_y" and "off_x" in keys:
-                    has_drag = "drag_dx" in keys and "drag_dy" in keys
-                    btn_offset = QPushButton("快捷填入偏移 (修正起点)" if has_drag else "快捷填入偏移")
-                    btn_offset.setStyleSheet(UIStyles.BTN_ACTION_PURPLE)
-                    btn_offset.clicked.connect(lambda: self.open_ruler("off_x", "off_y"))
-                    self.layout.addRow(btn_offset)
-                elif key == "drag_dy" and "drag_dx" in keys:
-                    btn_drag = QPushButton("快捷填入拖动距离 (动作路径)")
-                    btn_drag.setStyleSheet(UIStyles.BTN_ACTION_DEEP_PURPLE)
-                    btn_drag.clicked.connect(lambda: self.open_ruler("drag_dx", "drag_dy"))
-                    self.layout.addRow(btn_drag)
+                widget.valueChanged.connect(lambda v, k=key: self.update_param_from_widget(k))
+
+            # --- 动作信号 ---
+            if not preview_mode:
+                actual_widget = widget.inner_widget if isinstance(widget, ButtonParamWidget) else widget
+                # 快捷操作按钮信号
+                if isinstance(widget, ButtonParamWidget):
+                    if key == "image_path":
+                        widget.sig_action_clicked.connect(self.open_screenshot_tool)
+                    elif key == "center_hex":
+                        widget.sig_action_clicked.connect(self.open_color_picker)
+                    elif key == "y":
+                        widget.sig_action_clicked.connect(lambda: self.open_locator("x", "y"))
+                    elif key == "y1":
+                        widget.sig_action_clicked.connect(lambda: self.open_locator("x1", "y1"))
+                    elif key == "y2":
+                        widget.sig_action_clicked.connect(lambda: self.open_locator("x2", "y2"))
+                    elif key == "off_y":
+                        widget.sig_action_clicked.connect(lambda: self.open_ruler("off_x", "off_y"))
+                    elif key == "drag_dy":
+                        widget.sig_action_clicked.connect(lambda: self.open_ruler("drag_dx", "drag_dy"))
+
+                # 实际控件信号
+                if isinstance(actual_widget, RegionSelector):
+                    actual_widget.sig_request_select.connect(self.open_region_selector)
+                    actual_widget.sig_request_reset.connect(self.reset_region_to_fullscreen)
+                elif isinstance(actual_widget, KeyInputWidget):
+                    actual_widget.sig_request_record.connect(
+                        lambda w=actual_widget.line_edit: self.open_key_recorder(w)
+                    )
+
+            if isinstance(widget, ButtonParamWidget):
+                self.layout.addRow(label_text, widget.inner_widget)
+                self.layout.addRow(widget.btn)
+                widget.hide()
+                widget.setParent(self.form_widget)
+            elif key == "mode":
+                self.layout.addRow(widget)
+            else:
+                self.layout.addRow(label_text, widget)
+
+        self._refresh_hsv_ui()
+
+        if cmd_type == "if_color_start":
+            self.lbl_advanced_warn = QLabel("提示：若切换回基础模式，可能会重置已修改的 HSV 范围。")
+            self.lbl_advanced_warn.setStyleSheet(UIStyles.LBL_INFO_ERROR + " font-size: 14pt;")
+            self.lbl_advanced_warn.setWordWrap(True)
+            self.layout.addRow(self.lbl_advanced_warn)
+            self.lbl_advanced_warn.hide()
+            current_mode = cmd_data["params"].get("mode", "basic")
+            self._update_color_mode_ui(current_mode)
+
+    def _update_color_mode_ui(self, mode: str):
+        """根据找色模式动态调整相关 UI 参数显隐"""
+        is_advanced = mode == "advanced"
+
+        if "tolerance" in self.active_widgets:
+            tol_widget = self.active_widgets["tolerance"]
+            tol_label = self.layout.labelForField(tol_widget)
+            if tol_label:
+                tol_label.setVisible(not is_advanced)
+            tol_widget.setVisible(not is_advanced)
+
+        if "center_hex" in self.active_widgets:
+            actual_widget = (
+                self.active_widgets["center_hex"].inner_widget
+                if hasattr(self.active_widgets["center_hex"], "inner_widget")
+                else self.active_widgets["center_hex"]
+            )
+            if hasattr(actual_widget, "line_edit"):
+                actual_widget.line_edit.setReadOnly(is_advanced)
+
+        hsv_keys = ["h_start", "h_end", "s_min", "s_max", "v_min", "v_max"]
+        for k in hsv_keys:
+            if k in self.active_widgets:
+                actual_widget = (
+                    self.active_widgets[k].inner_widget
+                    if hasattr(self.active_widgets[k], "inner_widget")
+                    else self.active_widgets[k]
+                )
+                if hasattr(actual_widget, "setReadOnly"):
+                    actual_widget.setReadOnly(not is_advanced)
+
+        if "_hue_slider" in self.active_widgets:
+            self.active_widgets["_hue_slider"].mode = mode
+            self.active_widgets["_hue_slider"].update()
+
+        if hasattr(self, "lbl_advanced_warn"):
+            self.lbl_advanced_warn.setVisible(is_advanced)
+
+    def _get_all_anchors(self):
+        """获取当前任务中所有的锚点列表"""
+        options = []
+        if self.current_item and self.current_item.listWidget():
+            all_data = self.current_item.listWidget().get_all_data()
+            for i, step in enumerate(all_data):
+                if step.get("type") == "anchor":
+                    a_id = step.get("params", {}).get("anchor_id", "")
+                    a_desc = step.get("desc", "")
+                    if a_id:
+                        options.append(f"{a_id}  [行{i + 1}] {a_desc}")
+        return options
+
+    def _render_hsv_range_row(self, cmd_type, start_key, cmd_data, preview_mode):
+        """HSV 范围复合控件"""
+        config = global_config.get_config().get(cmd_type)
+        pair_map = {"h_start": ("h_end", "色相 H:"), "s_min": ("s_max", "饱和度 S:"), "v_min": ("v_max", "明度 V:")}
+        end_key, label_text = pair_map[start_key]
+
+        start_type, start_default = config["params"][start_key]
+        end_type, end_default = config["params"][end_key]
+        start_val = cmd_data["params"].get(start_key, start_default)
+        end_val = cmd_data["params"].get(end_key, end_default)
+
+        container = QWidget()
+        h_layout = QHBoxLayout(container)
+        h_layout.setContentsMargins(0, 0, 0, 0)
+        h_layout.setSpacing(5)
+
+        w_start = WidgetFactory.create_widget(start_key, start_type, start_val, [], preview_mode=preview_mode)
+        w_end = WidgetFactory.create_widget(end_key, end_type, end_val, [], preview_mode=preview_mode)
+
+        w_start.setMinimumWidth(0)
+        w_end.setMinimumWidth(0)
+        w_start.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        w_end.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+
+        if hasattr(w_start, "inner_widget"):
+            w_start.inner_widget.setMinimumWidth(0)
+            w_start.inner_widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        if hasattr(w_end, "inner_widget"):
+            w_end.inner_widget.setMinimumWidth(0)
+            w_end.inner_widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+
+        self.active_widgets[start_key] = w_start
+        self.active_widgets[end_key] = w_end
+        if not preview_mode:
+            w_start.valueChanged.connect(lambda v, k=start_key: self.update_param_from_widget(k))
+            w_end.valueChanged.connect(lambda v, k=end_key: self.update_param_from_widget(k))
+
+        lbl_tilde = QLabel("~")
+        lbl_tilde.setAlignment(Qt.AlignCenter)
+        lbl_tilde.setStyleSheet("font-weight: bold;")
+        lbl_tilde.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+
+        h_layout.addWidget(w_start, 5)
+        h_layout.addWidget(lbl_tilde, 1)
+        h_layout.addWidget(w_end, 5)
+        self.layout.addRow(label_text, container)
+
+        if start_key == "h_start":
+            hue_slider = HueRangeSlider(mode="basic")
+            hue_slider.set_value((start_val, end_val))
+            self.active_widgets["_hue_slider"] = hue_slider
+            self.layout.addRow(hue_slider)
+
+            if not preview_mode:
+                hue_slider.bind_inputs(w_start, w_end)
+                hue_slider.valueChanged.connect(lambda v: self.update_param_from_widget("h_start"))
+                hue_slider.valueChanged.connect(lambda v: self.update_param_from_widget("h_end"))
 
     # -------------------- 按键录制 --------------------
 
@@ -1880,26 +1846,6 @@ class PropertyEditor(QWidget):
         """按键录制完成回调"""
         line_edit.setText(key_str)
         self.update_param_from_widget("key_code")
-
-    # -------------------- 锚点 ID 填充 --------------------
-    def _handle_target_id_input(self, widget, key):
-        """查找当前任务中是否存在该 ID ，自动补全备注"""
-        text = widget.currentText().strip()
-        if text:
-            input_id = text.split()[0]
-            if self.current_item and self.current_item.listWidget():
-                all_data = self.current_item.listWidget().get_all_data()
-                for i, step in enumerate(all_data):
-                    if step.get("type") == "anchor":
-                        a_id = step.get("params", {}).get("anchor_id", "")
-                        if a_id == input_id:
-                            a_desc = step.get("desc", "")
-                            new_text = f"{a_id}  [行{i + 1}] {a_desc}"
-                            widget.blockSignals(True)
-                            widget.setCurrentText(new_text)
-                            widget.blockSignals(False)
-                            break
-        self.update_param_from_widget(key)
 
     # -------------------- 区域选择 --------------------
 
@@ -1953,11 +1899,100 @@ class PropertyEditor(QWidget):
             if self.current_item:
                 self.current_item.setData(Qt.UserRole, self.current_data)
             if "image_path" in self.active_widgets:
-                self.active_widgets["image_path"].setText(filename)
+                self.active_widgets["image_path"].set_value(filename)
                 self.update_param_from_widget("image_path")
             self.data_changed.emit()
         except Exception as e:
             QMessageBox.critical(self, "保存失败", str(e))
+
+    # -------------------- 取色工具 --------------------
+    def _refresh_hsv_ui(self):
+        """更新 HSV 范围显示"""
+        if "center_hex" not in self.active_widgets or "tolerance" not in self.active_widgets:
+            return
+        if self.current_data and self.current_data.get("params", {}).get("mode") == "advanced":
+            return
+
+        hex_str = str(self.active_widgets["center_hex"].get_value()).strip()
+        tolerance = int(self.active_widgets["tolerance"].get_value())
+
+        try:
+            ranges = ColorUtils.get_basic_hsv_ranges(hex_str, tolerance)
+            raw_vals = ranges["raw_values"]
+            hsv_keys = ["h_start", "h_end", "s_min", "s_max", "v_min", "v_max"]
+            for k in hsv_keys:
+                if k in self.active_widgets:
+                    self.active_widgets[k].set_value(raw_vals[k])
+
+            if self.current_data:
+                for k in hsv_keys:
+                    self.current_data["params"][k] = raw_vals[k]
+                if self.current_item:
+                    self.current_item.setData(Qt.UserRole, self.current_data)
+            if "_hue_slider" in self.active_widgets:
+                self.active_widgets["_hue_slider"].set_value((raw_vals["h_start"], raw_vals["h_end"]))
+        except Exception:
+            pass
+
+    def open_color_picker(self):
+        """打开屏幕取色工具"""
+        self.tool_window = ColorPickerTool()
+        self.tool_window.picked.connect(self.on_color_picked)
+        self.tool_window.show()
+
+    def on_color_picked(self, samples):
+        """取色完成回调"""
+        if not samples:
+            return
+
+        # 计算 HSV 极值和中心色值
+        stats = ColorUtils.analyze_samples(samples)
+        hex_code = stats["hex_code"]
+        h_start, s_min, v_min = stats["hsv_min"]
+        h_end, s_max, v_max = stats["hsv_max"]
+
+        mode = self.current_data["params"].get("mode", "basic")
+
+        if self.history_callback:
+            self.history_callback(f"修改第 {self._get_current_row_idx()} 行: 快捷取色 {hex_code}")
+
+        if mode == "basic":
+            # 基础模式：反推容差
+            tolerance = ColorUtils.calc_tolerance_from_ranges(hex_code, h_start, h_end, s_min, s_max, v_min, v_max)
+            self.active_widgets["center_hex"].set_value(hex_code)
+            self.active_widgets["tolerance"].set_value(tolerance)
+            self.current_data["params"]["center_hex"] = hex_code
+            self.current_data["params"]["tolerance"] = tolerance
+            if self.current_item:
+                self.current_item.setData(Qt.UserRole, self.current_data)
+            self._refresh_hsv_ui()
+
+        else:
+            # 高级模式：直接应用提取的 HSV
+            self.active_widgets["center_hex"].set_value(hex_code)
+            self.current_data["params"]["center_hex"] = hex_code
+
+            raw_vals = {
+                "h_start": h_start,
+                "h_end": h_end,
+                "s_min": int(s_min),
+                "s_max": int(s_max),
+                "v_min": int(v_min),
+                "v_max": int(v_max),
+            }
+
+            for k, v in raw_vals.items():
+                if k in self.active_widgets:
+                    self.active_widgets[k].set_value(v)
+                self.current_data["params"][k] = v
+
+            if "_hue_slider" in self.active_widgets:
+                self.active_widgets["_hue_slider"].set_value((h_start, h_end))
+
+            if self.current_item:
+                self.current_item.setData(Qt.UserRole, self.current_data)
+
+        self.data_changed.emit()
 
     # -------------------- 定位/测距工具 --------------------
 
@@ -1976,19 +2011,19 @@ class PropertyEditor(QWidget):
     def on_picked(self, x, y, dx, dy, key_x="x", key_y="y"):
         """定位完成回调"""
         if key_x in self.active_widgets:
-            self.active_widgets[key_x].setValue(x)
+            self.active_widgets[key_x].set_value(x)
             self.update_param_from_widget(key_x)
         if key_y in self.active_widgets:
-            self.active_widgets[key_y].setValue(y)
+            self.active_widgets[key_y].set_value(y)
             self.update_param_from_widget(key_y)
 
     def on_measured(self, x, y, dx, dy, key_x="off_x", key_y="off_y"):
         """测距完成回调"""
         if key_x in self.active_widgets:
-            self.active_widgets[key_x].setValue(dx)
+            self.active_widgets[key_x].set_value(dx)
             self.update_param_from_widget(key_x)
         if key_y in self.active_widgets:
-            self.active_widgets[key_y].setValue(dy)
+            self.active_widgets[key_y].set_value(dy)
             self.update_param_from_widget(key_y)
 
     # -------------------- 参数更新 --------------------
@@ -2025,16 +2060,16 @@ class PropertyEditor(QWidget):
         """从控件中读取新值并更新到数据字典"""
         if not self.current_data or key not in self.active_widgets:
             return
+
         widget = self.active_widgets[key]
-        new_val = None
-        if isinstance(widget, (QSpinBox, QDoubleSpinBox)):
-            new_val = widget.value()
+
+        if hasattr(widget, "get_value"):
+            new_val = widget.get_value()
         elif isinstance(widget, QLineEdit):
             new_val = widget.text()
-        elif isinstance(widget, QCheckBox):
-            new_val = widget.isChecked()
-        elif isinstance(widget, QComboBox):
-            new_val = widget.currentText()
+        else:
+            return
+
         if new_val is not None and self.current_data["params"].get(key) != new_val:
             if self.history_callback:
                 row_idx = self._get_current_row_idx()
@@ -2043,58 +2078,37 @@ class PropertyEditor(QWidget):
                     f"修改第 {self._get_current_row_idx()} 行: {PARAM_TRANSLATIONS.get(key, key)} -> {new_val}",
                     target_row=target_row_0based,
                 )
+
+            if key == "mode":
+                old_mode = self.current_data["params"].get("mode", "basic")
+                self._update_color_mode_ui(new_val)
+                # 高级模式 → 基础模式：根据当前的 HSV 范围反推容差
+                if old_mode == "advanced" and new_val == "basic":
+                    hex_str = str(self.active_widgets["center_hex"].get_value()).strip()
+                    h_start = float(self.active_widgets["h_start"].get_value())
+                    h_end = float(self.active_widgets["h_end"].get_value())
+                    s_min = float(self.active_widgets["s_min"].get_value())
+                    s_max = float(self.active_widgets["s_max"].get_value())
+                    v_min = float(self.active_widgets["v_min"].get_value())
+                    v_max = float(self.active_widgets["v_max"].get_value())
+                    new_tol = ColorUtils.calc_tolerance_from_ranges(hex_str, h_start, h_end, s_min, s_max, v_min, v_max)
+
+                    # 更新底层数据
+                    self.active_widgets["tolerance"].set_value(new_tol)
+                    self.current_data["params"]["tolerance"] = new_tol
+
             self.current_data["params"][key] = new_val
             self.current_item.setData(Qt.UserRole, self.current_data)
+
             if self.current_item.listWidget():
                 self.current_item.listWidget().viewport().update()
             self.data_changed.emit()
+
+            if key in ["tolerance", "center_hex"] or (key == "mode" and new_val == "basic"):
+                self._refresh_hsv_ui()
+
+        if hasattr(widget, "clearFocus"):
             widget.clearFocus()
-
-    # -------------------- 辅助按钮生成 --------------------
-
-    def add_helper_buttons(self, params_config):
-        """根据参数配置添加辅助操作按钮"""
-        keys = params_config.keys()
-        if "image_path" in keys and self.task_root_path:
-            btn_shot = QPushButton("快捷截图")
-            btn_shot.setStyleSheet(UIStyles.BTN_ACTION_ORANGE)
-            btn_shot.clicked.connect(self.open_screenshot_tool)
-            self.layout.addRow(btn_shot)
-        has_xy, has_start, has_end = (
-            ("x" in keys and "y" in keys),
-            ("x1" in keys and "y1" in keys),
-            ("x2" in keys and "y2" in keys),
-        )
-        if has_xy or has_start or has_end:
-            btn_pick = QPushButton("快捷填入坐标")
-            btn_pick.setStyleSheet(UIStyles.BTN_ACTION_BLUE)
-            if has_xy:
-                btn_pick.clicked.connect(lambda: self.open_locator("x", "y"))
-            elif has_start:
-                btn_pick.clicked.connect(lambda: self.open_locator("x1", "y1"))
-            if has_start and has_end:
-                btn_pick_start = QPushButton("快捷填入起点")
-                btn_pick_start.setStyleSheet(UIStyles.BTN_ACTION_BLUE)
-                btn_pick_start.clicked.connect(lambda: self.open_locator("x1", "y1"))
-                self.layout.addRow(btn_pick_start)
-                btn_pick_end = QPushButton("快捷填入终点")
-                btn_pick_end.setStyleSheet(UIStyles.BTN_ACTION_BLUE)
-                btn_pick_end.clicked.connect(lambda: self.open_locator("x2", "y2"))
-                self.layout.addRow(btn_pick_end)
-            elif not (has_start and has_end):
-                self.layout.addRow(btn_pick)
-        has_offset = "off_x" in keys and "off_y" in keys
-        has_drag = "drag_dx" in keys and "drag_dy" in keys
-        if has_offset:
-            btn_offset = QPushButton("快捷填入偏移 (修正起点)" if has_drag else "快捷填入偏移")
-            btn_offset.setStyleSheet(UIStyles.BTN_ACTION_PURPLE)
-            btn_offset.clicked.connect(lambda: self.open_ruler("off_x", "off_y"))
-            self.layout.addRow(btn_offset)
-        if has_drag:
-            btn_drag = QPushButton("快捷填入拖动距离 (动作路径)")
-            btn_drag.setStyleSheet(UIStyles.BTN_ACTION_DEEP_PURPLE)
-            btn_drag.clicked.connect(lambda: self.open_ruler("drag_dx", "drag_dy"))
-            self.layout.addRow(btn_drag)
 
 
 # ============================================================
@@ -2217,6 +2231,7 @@ class BatchEditWidget(QWidget):
         self.btn_apply.setEnabled(True)
         self.current_cmd_type = cmd_type
         config = global_config.get_config().get(cmd_type)
+        all_keys = list(config["params"].keys())
 
         # 备注说明
         chk_desc = QCheckBox("备注说明")
@@ -2228,11 +2243,25 @@ class BatchEditWidget(QWidget):
 
         # 各参数
         for key, (data_type, default_val) in config["params"].items():
-            if key in ["link_id", "collapsed", "env_w", "env_h"]:
+            if key in [
+                "link_id",
+                "collapsed",
+                "env_w",
+                "env_h",
+                "h_start",
+                "h_end",
+                "s_min",
+                "s_max",
+                "v_min",
+                "v_max",
+                "mode",
+            ]:
                 continue
             chk_param = QCheckBox(PARAM_TRANSLATIONS.get(key, f"{key}:"))
             chk_param.setChecked(True)
-            widget = WidgetFactory.create_input_widget(data_type, default_val)
+            widget = WidgetFactory.create_widget(
+                key, data_type, default_val, all_keys, preview_mode=False, batch_edit_mode=True
+            )
             if widget:
                 self.form_layout.addRow(chk_param, widget)
                 self.active_widgets[key] = widget
@@ -2250,15 +2279,13 @@ class BatchEditWidget(QWidget):
         # 收集启用的新值
         new_params = {}
         new_desc = self.active_widgets["desc"].text() if self.active_checkboxes["desc"].isChecked() else None
+
         for key, widget in self.active_widgets.items():
             if key == "desc" or not self.active_checkboxes[key].isChecked():
                 continue
-            if isinstance(widget, (QSpinBox, QDoubleSpinBox)):
-                new_params[key] = widget.value()
-            elif isinstance(widget, QLineEdit):
-                new_params[key] = widget.text()
-            elif isinstance(widget, QCheckBox):
-                new_params[key] = widget.isChecked()
+
+            if hasattr(widget, "get_value"):
+                new_params[key] = widget.get_value()
 
         # 写入每个目标项
         for item in self.target_items:
