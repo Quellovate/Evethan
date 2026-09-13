@@ -112,6 +112,12 @@ class GlobalConfigManager:
             with open(self.USER_SETTINGS_FILE, "r", encoding="utf-8") as f:
                 user_data = json.load(f)
 
+            # 迁移 if_start -> if_image_start
+            if "cmds" in user_data:
+                if "if_start" in user_data["cmds"]:
+                    user_data["cmds"]["if_image_start"] = user_data["cmds"].pop("if_start")
+                    self._write_json(user_data)
+
             # 加载指令参数覆盖
             if "cmds" in user_data:
                 for cmd, cmd_data in user_data["cmds"].items():
@@ -403,11 +409,21 @@ class TaskManager:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+
+            steps = []
             if isinstance(data, dict):
-                return data.get("steps", [])
+                steps = data.get("steps", [])
             elif isinstance(data, list):
-                return data
-            return []
+                steps = data
+
+            # if_start → if_image_start, if_color_end → if_end 兼容性调整
+            for step in steps:
+                if step.get("type") == "if_start":
+                    step["type"] = "if_image_start"
+                elif step.get("type") == "if_color_end":
+                    step["type"] = "if_end"
+
+            return steps
         except:
             return []
 

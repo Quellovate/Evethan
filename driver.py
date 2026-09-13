@@ -50,7 +50,6 @@ class TargetDriver:
     def clear_cache(self):
         """清空图片模板缓存"""
         self._image_cache.clear()
-        print("图片缓存已清理")
 
     def get_fixed_coordinate(self, x, y, random_range=0):
         """获取固定坐标（带高斯随机偏移）"""
@@ -808,12 +807,16 @@ class ActionDriver:
         if not keys_to_press:
             return
 
+        if not hasattr(self, "_held_keys"):
+            self._held_keys = set()
+
         for i in range(repeat):
             if self._is_stopped():
                 break
             if self.use_driver:
                 # 硬件模式：将按键名映射为 HID 码后发送
-                hid_codes, unsupported_keys = Utils.map_key_names(keys_to_press, lgdriver.KEY_MAP)
+                combined_keys = list(self._held_keys) + keys_to_press
+                hid_codes, unsupported_keys = Utils.map_key_names(combined_keys, lgdriver.KEY_MAP)
 
                 if unsupported_keys:
                     print(f"硬件模式不支持这些按键: {unsupported_keys}")
@@ -823,7 +826,7 @@ class ActionDriver:
                         self.lg_keyboard.press_keys(hid_codes)
                         time.sleep(duration)
                     finally:
-                        self.lg_keyboard.release()
+                        self._sync_hardware_keyboard()
             else:
                 # 软件模式：逐个按下再逆序释放
                 for k in keys_to_press:

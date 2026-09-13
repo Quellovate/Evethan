@@ -50,7 +50,7 @@ class ScriptExecutor:
         self.context_provider = func
 
     def set_current_step_desc(self, desc):
-        """更新当前步骤描述"""
+        """更新当前指令描述"""
         self.current_step_desc = desc
 
     def _is_stopped(self):
@@ -60,7 +60,7 @@ class ScriptExecutor:
         return False
 
     def _emit(self, event_type, message, data=None):
-        """发送事件通知，附带当前步骤和上下文信息"""
+        """发送事件通知，附带当前指令和上下文信息"""
         if self._is_stopped():
             return
         if data is None:
@@ -541,7 +541,7 @@ class ScriptExecutor:
 
     # ==================== 条件判断（If/Else/End） ====================
 
-    def exec_if_start(
+    def exec_if_image_start(
         self, image_path, confidence=0.7, timeout=5.0, link_id=None, region=None, env_w=0, env_h=0, **kwargs
     ):
         """条件判断：在超时时间内查找图片，找到返回True，否则False"""
@@ -663,11 +663,11 @@ class ScriptExecutor:
     # ==================== 分组与分割线 ====================
 
     def exec_group_start(self, label="分组", link_id=None, collapsed=False):
-        """进入步骤分组"""
+        """进入指令分组"""
         self._emit(ExecutionEvent.DEBUG, f"进入分组: {label}")
 
     def exec_group_end(self, link_id=None):
-        """离开步骤分组"""
+        """离开指令分组"""
         self._emit(ExecutionEvent.DEBUG, "离开分组")
 
     def exec_separator(self, label="—— 分割线 ——"):

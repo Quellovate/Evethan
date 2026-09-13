@@ -25,7 +25,9 @@ DEFAULT_APP_SETTINGS = {
 # ============================================================
 # 动作工厂配置（每种动作的元信息与默认参数）
 # 格式：参数名 -> (类型, 默认值)
-
+#
+# "category"   : 工具箱列表分类，其中 end 节点无需分类
+#
 # traits 特征:
 # "start"      : 结构起点
 # "end"        : 结构终点
@@ -48,6 +50,7 @@ DEFAULT_APP_SETTINGS = {
 FACTORY_CONFIG = {
     # ---- 鼠标移动 / 滚轮 ----
     "mouse_move": {
+        "category": "鼠标操作",
         "label": "🖱️ 鼠标移动",
         "desc": "将鼠标移动到指定坐标",
         "traits": [],
@@ -63,7 +66,21 @@ FACTORY_CONFIG = {
             "wait_max": (int, 200),
         },
     },
+    "scroll": {
+        "category": "鼠标操作",
+        "label": "🖱️ 滚轮滚动",
+        "desc": "滚动鼠标滚轮（正数向上, 负数向下）",
+        "traits": [],
+        "ui_bg": "normal",
+        "params": {
+            "scroll_amount": (int, -100),
+            "random_range": (int, 10),
+            "wait_min": (int, 50),
+            "wait_max": (int, 200),
+        },
+    },
     "camera_turn": {
+        "category": "鼠标操作",
         "label": "🔄 视角转动",
         "desc": "用于 3D 游戏的视角旋转",
         "traits": [],
@@ -78,20 +95,9 @@ FACTORY_CONFIG = {
             "wait_max": (int, 200),
         },
     },
-    "scroll": {
-        "label": "🖱️ 滚轮滚动",
-        "desc": "滚动鼠标滚轮（正数向上, 负数向下）",
-        "traits": [],
-        "ui_bg": "normal",
-        "params": {
-            "scroll_amount": (int, -100),
-            "random_range": (int, 10),
-            "wait_min": (int, 50),
-            "wait_max": (int, 200),
-        },
-    },
     # ---- 点击（固定坐标 / 相对偏移 / 识图） ----
     "fixed_click": {
+        "category": "鼠标操作",
         "label": "👆 固定坐标点击",
         "desc": "将鼠标移动到指定坐标后点击",
         "traits": [],
@@ -112,6 +118,7 @@ FACTORY_CONFIG = {
         },
     },
     "offset_click": {
+        "category": "鼠标操作",
         "label": "👆 相对偏移点击",
         "desc": "相对于当前鼠标位置偏移后点击",
         "traits": [],
@@ -132,6 +139,7 @@ FACTORY_CONFIG = {
         },
     },
     "image_click": {
+        "category": "鼠标操作",
         "label": "👆 识图点击",
         "desc": "成功识别图片后点击（默认点击图片中心）",
         "traits": [],
@@ -158,6 +166,7 @@ FACTORY_CONFIG = {
     },
     # ---- 长按（固定坐标 / 相对偏移 / 识图） ----
     "fixed_long_press": {
+        "category": "鼠标操作",
         "label": "⏱️ 固定坐标长按",
         "desc": "将鼠标移动到指定坐标后长按",
         "traits": [],
@@ -179,6 +188,7 @@ FACTORY_CONFIG = {
         },
     },
     "offset_long_press": {
+        "category": "鼠标操作",
         "label": "⏱️ 相对偏移长按",
         "desc": "相对于当前鼠标位置偏移后长按",
         "traits": [],
@@ -200,6 +210,7 @@ FACTORY_CONFIG = {
         },
     },
     "image_long_press": {
+        "category": "鼠标操作",
         "label": "⏱️ 识图长按",
         "desc": "成功识别图片后长按（默认长按图片中心）",
         "traits": [],
@@ -227,6 +238,7 @@ FACTORY_CONFIG = {
     },
     # ---- 拖拽（坐标拖拽 / 识图拖拽） ----
     "mouse_drag": {
+        "category": "鼠标操作",
         "label": "✋ 鼠标拖拽",
         "desc": "将鼠标从指定起点按住拖拽到指定终点",
         "traits": [],
@@ -245,6 +257,7 @@ FACTORY_CONFIG = {
         },
     },
     "image_drag": {
+        "category": "鼠标操作",
         "label": "✋ 识图拖拽",
         "desc": "成功识别图片后相对拖拽指定距离",
         "traits": [],
@@ -269,6 +282,7 @@ FACTORY_CONFIG = {
     },
     # ---- 键盘操作 ----
     "key_press": {
+        "category": "键盘操作",
         "label": "⌨️ 键盘按键",
         "desc": "敲击键盘按键",
         "traits": ["key_record"],
@@ -283,6 +297,7 @@ FACTORY_CONFIG = {
         },
     },
     "key_long_press": {
+        "category": "键盘操作",
         "label": "⌨️ 键盘长按",
         "desc": "长按键盘按键",
         "traits": ["key_record"],
@@ -299,6 +314,7 @@ FACTORY_CONFIG = {
     },
     # ---- 状态控制：按下与抬起 ----
     "mouse_hold_start": {
+        "category": "鼠标操作",
         "label": "🖱️ 鼠标按下 (开始)",
         "desc": "按下鼠标按键并保持，直到遇到结束节点",
         "traits": ["start"],
@@ -313,6 +329,7 @@ FACTORY_CONFIG = {
         "params": {"link_id": (str, "")},
     },
     "key_hold_start": {
+        "category": "键盘操作",
         "label": "⌨️ 键盘按下 (开始)",
         "desc": "按下键盘按键并保持，支持修饰键",
         "traits": ["start", "key_record"],
@@ -326,8 +343,9 @@ FACTORY_CONFIG = {
         "ui_bg": "hold",
         "params": {"link_id": (str, "")},
     },
-    # ---- 等待 / 找图 ----
+    # ---- 流程控制：等待 / 跳转 ----
     "wait": {
+        "category": "流程控制",
         "label": "⏳ 延时等待",
         "desc": "任务暂停等待一段时间",
         "traits": [],
@@ -335,6 +353,7 @@ FACTORY_CONFIG = {
         "params": {"time_s": (float, 2.0), "random_add_s": (float, 0.5)},
     },
     "find_image": {
+        "category": "流程控制",
         "label": "🔍 寻找图片",
         "desc": "循环找图直到成功识别，再执行下一步",
         "traits": [],
@@ -349,8 +368,24 @@ FACTORY_CONFIG = {
             "env_h": (int, 0),
         },
     },
-    # ---- 流程控制 ----
+    "anchor": {
+        "category": "流程控制",
+        "label": "📌 锚点",
+        "desc": "设置可供跳转的锚点位置",
+        "traits": [],
+        "ui_bg": "flow",
+        "params": {"anchor_id": (str, ""), "wait_min": (int, 50), "wait_max": (int, 100)},
+    },
+    "jump": {
+        "category": "流程控制",
+        "label": "🚀 跳转至锚点",
+        "desc": "跳转到指定的锚点位置",
+        "traits": [],
+        "ui_bg": "flow",
+        "params": {"target_id": (str, "")},
+    },
     "break_loop": {
+        "category": "流程控制",
         "label": "🛑 跳出循环",
         "desc": "强制退出当前所在的循环层（只跳一层）",
         "traits": ["flow"],
@@ -358,13 +393,16 @@ FACTORY_CONFIG = {
         "params": {},
     },
     "stop_task": {
+        "category": "流程控制",
         "label": "🛑 停止任务",
         "desc": "强制终止整个任务，不再运行",
         "traits": ["flow"],
         "ui_bg": "flow",
         "params": {},
     },
+    # ---- 结构模块：循环 / 条件判断 / 分组 ----
     "loop_start": {
+        "category": "结构模块",
         "label": "🔁 For 循环开始",
         "desc": "设定循环次数",
         "traits": ["start", "fold"],
@@ -378,7 +416,8 @@ FACTORY_CONFIG = {
         "ui_bg": "loop",
         "params": {"link_id": (str, "")},
     },
-    "if_start": {
+    "if_image_start": {
+        "category": "结构模块",
         "label": "🔀 判断:若识图成功",
         "desc": "限时循环找图，成功则执行下方指令，失败则跳过或执行Else",
         "traits": ["start", "fold"],
@@ -395,6 +434,7 @@ FACTORY_CONFIG = {
         },
     },
     "if_color_start": {
+        "category": "结构模块",
         "label": "🔀 判断:若找色成功",
         "desc": "限时循环找色，找到像素数达标则执行下方指令，否则执行Else",
         "traits": ["start", "fold"],
@@ -423,36 +463,17 @@ FACTORY_CONFIG = {
         "ui_bg": "if",
         "params": {"link_id": (str, "")},
     },
-    "if_color_end": {
-        "label": "🔀 找色判断结束",
-        "desc": "逻辑分支结束点",
-        "traits": ["end"],
-        "ui_bg": "if",
-        "params": {"link_id": (str, "")},
-    },
     "else_branch": {
+        "category": "结构模块",
         "label": "🔀 否则 (Else)",
         "desc": "当判断条件不满足时执行此处的指令",
         "traits": ["branch"],
         "ui_bg": "if",
         "params": {"link_id": (str, "")},
     },
-    "anchor": {
-        "label": "📌 锚点",
-        "desc": "设置可供跳转的锚点位置",
-        "traits": [],
-        "ui_bg": "flow",
-        "params": {"anchor_id": (str, ""), "wait_min": (int, 50), "wait_max": (int, 100)},
-    },
-    "jump": {
-        "label": "🚀 跳转至锚点",
-        "desc": "跳转到指定的锚点位置",
-        "traits": [],
-        "ui_bg": "flow",
-        "params": {"target_id": (str, "")},
-    },
     # ---- 分组 / 分割线 ----
     "group_start": {
+        "category": "结构模块",
         "label": "📂 任务分组",
         "desc": "折叠管理过长任务 (点击 + 号展开)",
         "traits": ["start", "fold"],
@@ -467,6 +488,7 @@ FACTORY_CONFIG = {
         "params": {"link_id": (str, "")},
     },
     "separator": {
+        "category": "结构模块",
         "label": "➖ —— 分割线 ——",
         "desc": "纯视觉分割",
         "traits": ["separator"],
@@ -619,7 +641,7 @@ SHIFT_CHAR_MAP = {
 DISPLAY_NAME_OVERRIDE = {
     "loop_start": "🔁 For 循环模块",
     "group_start": "📂 分组模块",
-    "if_start": "🔀 识图判断模块 (If)",
+    "if_image_start": "🔀 识图判断模块 (If)",
     "if_color_start": "🔀 找色判断模块 (If)",
     "else_branch": "🔀 否则 (Else)",
     "mouse_hold_start": "🖱️ 鼠标按下&抬起",

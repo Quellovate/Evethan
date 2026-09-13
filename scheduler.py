@@ -1,5 +1,5 @@
 # scheduler.py
-# 脚本调度器：负责解析脚本步骤列表，按顺序执行指令，处理循环、条件分支、中断等控制流
+# 脚本调度器：负责解析脚本指令列表，按顺序执行指令，处理循环、条件分支、中断等控制流
 
 import time
 import os
@@ -15,42 +15,19 @@ class TaskScheduler:
         self.is_running = False
         self.call_stack = []  # 调用栈，用于子任务嵌套
         self.ctx = None  # 当前执行上下文
+        self.event_listener = None
 
-        # 指令类型 -> 执行函数的映射表
-        self.function_map = {
-            "mouse_move": self.executor.exec_mouse_move,
-            "camera_turn": self.executor.exec_camera_turn,
-            "fixed_click": self.executor.exec_fixed_click,
-            "offset_click": self.executor.exec_offset_click,
-            "image_click": self.executor.exec_image_click,
-            "mouse_drag": self.executor.exec_mouse_drag,
-            "image_drag": self.executor.exec_image_drag,
-            "fixed_long_press": self.executor.exec_fixed_long_press,
-            "offset_long_press": self.executor.exec_offset_long_press,
-            "image_long_press": self.executor.exec_image_long_press,
-            "key_press": self.executor.exec_key_press,
-            "key_long_press": self.executor.exec_key_long_press,
-            "scroll": self.executor.exec_scroll,
-            "wait": self.executor.exec_wait,
-            "find_image": self.executor.exec_find_image,
-            "loop_start": self.executor.exec_loop_start,
-            "loop_end": self.executor.exec_loop_end,
-            "group_start": self.executor.exec_group_start,
-            "group_end": self.executor.exec_group_end,
-            "separator": self.executor.exec_separator,
-            "if_start": self.executor.exec_if_start,
-            "if_color_start": self.executor.exec_if_color_start,
-            "else_branch": self.executor.exec_else_branch,
-            "if_end": self.executor.exec_if_end,
-            "if_color_end": self.executor.exec_if_end,
-            "anchor": self.executor.exec_anchor,
-            "jump": self.executor.exec_jump,
-            "break_loop": self.executor.exec_break,
-            "stop_task": self.executor.exec_stop_task,
-            "mouse_hold_start": self.executor.exec_mouse_hold_start,
-            "mouse_hold_end": self.executor.exec_mouse_hold_end,
-            "key_hold_start": self.executor.exec_key_hold_start,
-            "key_hold_end": self.executor.exec_key_hold_end,
+        self._handlers = {
+            "call_subtask": self._handle_call_subtask,
+            "loop_start": self._handle_loop_start,
+            "loop_end": self._handle_loop_end,
+            "if_image_start": self._handle_if_start,
+            "if_color_start": self._handle_if_start,
+            "else_branch": self._handle_else_branch,
+            "if_end": self._handle_if_end,
+            "jump": self._handle_jump,
+            "break_loop": self._handle_break_loop,
+            "stop_task": self._handle_stop_task,
         }
 
     # ──────────────────────────────────────────────
@@ -107,18 +84,18 @@ class TaskScheduler:
             self.ctx["loop_stack"] = [x for x in self.ctx["loop_stack"] if x["id"] != link_id]
 
     # ──────────────────────────────────────────────
-    #  步骤索引查找（用于控制流跳转）
+    #  指令索引查找（用于控制流跳转）
     # ──────────────────────────────────────────────
 
     def _find_loop_start_index(self, task_list, link_id):
-        """根据 link_id 查找对应的 loop_start 步骤索引"""
+        """根据 link_id 查找对应的 loop_start 指令索引"""
         for i, step in enumerate(task_list):
             if step.get("type") == "loop_start" and step.get("params", {}).get("link_id") == link_id:
                 return i
         return None
 
     def _find_target_node(self, task_list, start_index, target_type, link_id):
-        """从 start_index 之后查找指定类型和 link_id 的步骤索引（用于 if/else/if_end 跳转）"""
+        """从 start_index 之后查找指定类型和 link_id 的指令索引（用于 if/else/if_end 跳转）"""
         for i in range(start_index + 1, len(task_list)):
             step = task_list[i]
             if step.get("type") == target_type and step.get("params", {}).get("link_id") == link_id:
@@ -126,7 +103,7 @@ class TaskScheduler:
             # 查找 else_branch 时若先遇到 if_end，说明没有 else 分支
             if (
                 target_type == "else_branch"
-                and step.get("type") in ["if_end", "if_color_end"]
+                and step.get("type") == "if_end"
                 and step.get("params", {}).get("link_id") == link_id
             ):
                 return None
@@ -146,13 +123,219 @@ class TaskScheduler:
         return None
 
     # ──────────────────────────────────────────────
+    #  控制流处理方法
+    # ──────────────────────────────────────────────
+
+    #  所有 handler 统一签名：handler(cmd_type, params, step_desc) -> bool
+    #  返回值：
+    #  True  = 当前指令处理完成，主循环（轮次）继续执行
+    #  False = 立即退出当前执行循环（轮次）
+
+    def _handle_call_subtask(self, cmd_type, params, step_desc):
+        """子任务调用"""
+        sub_id = params.get("task_id")
+        sub_name_fallback = params.get("task_name", "未知子任务")
+
+        # 深度限制
+        if len(self.call_stack) >= 10:
+            self._emit(ExecutionEvent.ERROR, "调用栈溢出：检测到过深的子任务嵌套或死循环，即将停止！")
+            self.is_running = False
+            return False
+
+        if not self.task_manager:
+            self._emit(ExecutionEvent.ERROR, "无法解析子任务")
+            self.ctx["index"] += 1
+            return True
+
+        # 寻址
+        actual_name = self.task_manager.task_id_map.get(sub_id)
+        if not actual_name:
+            self._emit(ExecutionEvent.ERROR, f"调用失败：找不到子任务[{sub_name_fallback}]")
+            self.ctx["index"] += 1
+            return True
+
+        sub_script = self.task_manager.load_script(actual_name)
+        sub_dir = self.task_manager.get_task_path(actual_name)
+        self._emit(ExecutionEvent.INFO, f"进入子任务: {actual_name}")
+
+        # 上下文先移动到下一条指令，再压栈
+        self.ctx["index"] += 1
+        self.call_stack.append(self.ctx)
+        self.ctx = {
+            "task_name": actual_name,
+            "task_dir": sub_dir,
+            "task_list": sub_script,
+            "index": 0,
+            "loop_counters": {},
+            "loop_stack": [],
+        }
+        return True
+
+    def _handle_loop_start(self, cmd_type, params, step_desc):
+        """循环开始"""
+        link_id = params.get("link_id")
+        count = params.get("count", 1)
+
+        # 首次进入该循环时初始化计数器和循环显示栈
+        if link_id not in self.ctx["loop_counters"]:
+            self.ctx["loop_counters"][link_id] = 0
+            label = "循环" if step_desc == "For 循环开始" else step_desc
+            self.ctx["loop_stack"].append({"id": link_id, "label": label, "current": 1, "total": count})
+
+        runtime_params = params.copy()
+        runtime_params["current_loop_index"] = self.ctx["loop_counters"][link_id]
+        self.executor.exec_loop_start(**runtime_params)
+        self.ctx["index"] += 1
+        return True
+
+    def _handle_loop_end(self, cmd_type, params, step_desc):
+        """循环结束：决定回跳或离开循环"""
+        link_id = params.get("link_id")
+        start_index = self._find_loop_start_index(self.ctx["task_list"], link_id)
+        if start_index is None:
+            self.ctx["index"] += 1
+            return True
+
+        target_count = self.ctx["task_list"][start_index].get("params", {}).get("count", 1)
+        if link_id not in self.ctx["loop_counters"]:
+            self.ctx["loop_counters"][link_id] = 0
+        self.ctx["loop_counters"][link_id] += 1
+
+        # 未达目标次数 -> 跳回循环体开头
+        if self.ctx["loop_counters"][link_id] < target_count:
+            for item in reversed(self.ctx["loop_stack"]):
+                if item["id"] == link_id:
+                    item["current"] = self.ctx["loop_counters"][link_id] + 1
+                    break
+            self._emit(ExecutionEvent.DEBUG, f"循环回跳: {self.ctx['loop_counters'][link_id]}/{target_count}")
+            self.ctx["index"] = start_index + 1
+
+        #  已达目标次数 -> 循环结束，清理
+        else:
+            self._emit(ExecutionEvent.DEBUG, f"循环完成: {link_id}")
+            del self.ctx["loop_counters"][link_id]
+            if self.ctx["loop_stack"] and self.ctx["loop_stack"][-1]["id"] == link_id:
+                self.ctx["loop_stack"].pop()
+            self.ctx["index"] += 1
+        return True
+
+    def _handle_if_start(self, cmd_type, params, step_desc):
+        """条件判断开始"""
+        func_name = f"exec_{cmd_type}"
+        func = getattr(self.executor, func_name, None)
+
+        if callable(func):
+            condition_met = func(**params)
+        else:
+            self._emit(ExecutionEvent.ERROR, f"未知判断指令: {cmd_type}")
+            self.ctx["index"] += 1
+            return True
+
+        if condition_met:  # 条件成立：顺序进入 if 体
+            self.ctx["index"] += 1
+        else:  # 条件不成立：尝试跳到 else 分支
+            link_id = params.get("link_id")
+            else_index = self._find_target_node(self.ctx["task_list"], self.ctx["index"], "else_branch", link_id)
+            if else_index is not None:
+                self._emit(ExecutionEvent.DEBUG, f"跳转到 Else 分支 (行 {else_index + 1})")
+                self.ctx["index"] = else_index + 1
+            else:  # 没有 else 分支跳过整个 If 模块
+                end_index = self._find_target_node(self.ctx["task_list"], self.ctx["index"], "if_end", link_id)
+                if end_index is not None:
+                    self._emit(ExecutionEvent.DEBUG, f"跳过 If 模块 (跳转至行 {end_index + 1})")
+                    self.ctx["index"] = end_index + 1
+                else:
+                    self._emit(ExecutionEvent.ERROR, "结构错误：找不到 if_end")
+                    self.ctx["index"] += 1
+        return True
+
+    def _handle_else_branch(self, cmd_type, params, step_desc):
+        """Else 分支：若能顺序执行到 Else 节点，说明 If 条件成立，直接跳过 Else 分支"""
+        link_id = params.get("link_id")
+        end_index = self._find_target_node(self.ctx["task_list"], self.ctx["index"], "if_end", link_id)
+        if end_index is not None:
+            self.ctx["index"] = end_index + 1
+        else:
+            self._emit(ExecutionEvent.ERROR, "结构错误：Else 后找不到 if_end")
+            self.ctx["index"] += 1
+        return True
+
+    def _handle_if_end(self, cmd_type, params, step_desc):
+        """条件判断结束"""
+        self.executor.exec_if_end(**params)
+        self.ctx["index"] += 1
+        return True
+
+    def _handle_jump(self, cmd_type, params, step_desc):
+        """锚点跳转"""
+        target_raw = params.get("target_id", "")
+        target = target_raw.split()[0] if target_raw else ""
+        self.executor.exec_jump(target)
+
+        # 在当前任务上下文中寻找目标锚点
+        found_idx = -1
+        for i, step in enumerate(self.ctx["task_list"]):
+            if step.get("type") == "anchor" and step.get("params", {}).get("anchor_id") == target:
+                found_idx = i
+                break
+
+        if found_idx != -1:
+            self._emit(ExecutionEvent.INFO, f"跳转成功，前往第 {found_idx + 1} 行")
+            self.ctx["index"] = found_idx
+        else:
+            self._emit(ExecutionEvent.WARNING, f"跳转失败：未找到目标 '{target}'")
+            self.ctx["index"] += 1
+        return True
+
+    def _handle_break_loop(self, cmd_type, params, step_desc):
+        """跳出循环：只跳出最内层"""
+        self.executor.exec_break()
+        loop_end_index = self._find_enclosing_loop_end(self.ctx["task_list"], self.ctx["index"])
+        if loop_end_index is not None:
+            end_step_data = self.ctx["task_list"][loop_end_index]
+            link_id = end_step_data.get("params", {}).get("link_id")
+            if link_id in self.ctx["loop_counters"]:
+                del self.ctx["loop_counters"][link_id]
+            self._update_loop_stack_on_break(link_id)
+            self._emit(ExecutionEvent.DEBUG, f"跳出循环 (跳转至行 {loop_end_index + 1})")
+            self.ctx["index"] = loop_end_index + 1
+        else:
+            self._emit(ExecutionEvent.WARNING, "当前不在循环内，无法跳出")
+            self.ctx["index"] += 1
+        return True
+
+    def _handle_stop_task(self, cmd_type, params, step_desc):
+        """停止任务"""
+        self.executor.exec_stop_task()
+        self.is_running = False
+        return False
+
+    def _handle_normal_cmd(self, cmd_type, params, step_desc):
+        """执行普通指令"""
+        func_name = f"exec_{cmd_type}"
+        func = getattr(self.executor, func_name, None)
+        if callable(func):
+            try:
+                func(**params)
+                if not self.is_running:
+                    return False
+            except Exception as e:
+                self._emit(ExecutionEvent.ERROR, f"执行异常: {e}")
+                self.is_running = False
+                return False
+        else:
+            self._emit(ExecutionEvent.WARNING, f"未知指令类型: {cmd_type}")
+        self.ctx["index"] += 1
+        return True
+
+    # ──────────────────────────────────────────────
     #  主执行入口
     # ──────────────────────────────────────────────
 
     def run_script(self, task_list, task_name, task_dir, run_times=1, timeout_sec=36000):
         """
         执行脚本主循环
-        :param task_list: 步骤列表
+        :param task_list: 指令列表
         :param run_times: 总轮数
         :param timeout_sec: 单轮超时秒数，<=0 表示不限时
         """
@@ -209,19 +392,15 @@ class TaskScheduler:
                         break
                     # 检查单轮超时
                     if time.time() > self.current_round_deadline:
-                        self._emit(
-                            ExecutionEvent.WARNING,
-                            f"🚨 触发超时重置 (超过 {timeout_sec} 秒)，中断当前执行，准备重开...",
-                        )
+                        self._emit(ExecutionEvent.WARNING, f"🚨 触发超时重置 (超过 {timeout_sec} 秒)，中断当前轮次...")
                         break
 
-                    # 检查当前上下文是否执行到底部
+                    # 检查当前任务/子任务是否执行到底部
                     if self.ctx["index"] >= len(self.ctx["task_list"]):
-                        if not self.call_stack:
+                        if not self.call_stack:  # 根任务执行完毕
                             break
                         else:
-                            # 子任务执行完毕：清理残留状态，退栈返回上一层
-                            self.executor.cleanup_all_holds()
+                            # 子任务执行完毕：退栈返回上一层
                             self._emit(ExecutionEvent.INFO, f"⤴️ 子任务 [{self.ctx['task_name']}] 执行完毕，返回上一层")
                             self.ctx = self.call_stack.pop()
                             continue
@@ -240,195 +419,10 @@ class TaskScheduler:
                         if not os.path.isabs(params["image_path"]):
                             params["image_path"] = os.path.join(self.ctx["task_dir"], params["image_path"])
 
-                    # ── 调用子任务 ──
-                    if cmd_type == "call_subtask":
-                        sub_id = params.get("task_id")
-                        sub_name_fallback = params.get("task_name", "未知子任务")
-
-                        # 深度限制
-                        if len(self.call_stack) >= 10:
-                            self._emit(ExecutionEvent.ERROR, "调用栈溢出：检测到过深的子任务嵌套或死循环，即将停止！")
-                            self.is_running = False
-                            break
-
-                        if not self.task_manager:
-                            self._emit(ExecutionEvent.ERROR, "无法解析子任务")
-                            self.ctx["index"] += 1
-                            continue
-
-                        # 寻址
-                        actual_name = self.task_manager.task_id_map.get(sub_id)
-                        if not actual_name:
-                            self._emit(ExecutionEvent.ERROR, f"调用失败：找不到子任务[{sub_name_fallback}]")
-                            self.ctx["index"] += 1
-                            continue
-
-                        sub_script = self.task_manager.load_script(actual_name)
-                        sub_dir = self.task_manager.get_task_path(actual_name)
-
-                        self._emit(ExecutionEvent.INFO, f"进入子任务: {actual_name}")
-
-                        # 压栈并切换上下文
-                        self.ctx["index"] += 1
-                        self.call_stack.append(self.ctx)
-                        self.ctx = {
-                            "task_name": actual_name,
-                            "task_dir": sub_dir,
-                            "task_list": sub_script,
-                            "index": 0,
-                            "loop_counters": {},
-                            "loop_stack": [],
-                        }
-                        continue
-
-                    # ── 循环开始 ──
-                    elif cmd_type == "loop_start":
-                        link_id = params.get("link_id")
-                        count = params.get("count", 1)
-                        if link_id not in self.ctx["loop_counters"]:
-                            self.ctx["loop_counters"][link_id] = 0
-                            label = "循环" if step_desc == "For 循环开始" else step_desc
-                            self.ctx["loop_stack"].append({"id": link_id, "label": label, "current": 1, "total": count})
-                        runtime_params = params.copy()
-                        runtime_params["current_loop_index"] = self.ctx["loop_counters"][link_id]
-                        self.executor.exec_loop_start(**runtime_params)
-                        self.ctx["index"] += 1
-
-                    # ── 循环结束 ──
-                    elif cmd_type == "loop_end":
-                        link_id = params.get("link_id")
-                        start_index = self._find_loop_start_index(self.ctx["task_list"], link_id)
-                        if start_index is None:
-                            self.ctx["index"] += 1
-                            continue
-                        target_count = self.ctx["task_list"][start_index].get("params", {}).get("count", 1)
-                        if link_id not in self.ctx["loop_counters"]:
-                            self.ctx["loop_counters"][link_id] = 0
-                        self.ctx["loop_counters"][link_id] += 1
-
-                        # 未达目标次数 -> 跳回循环体开头
-                        if self.ctx["loop_counters"][link_id] < target_count:
-                            for item in reversed(self.ctx["loop_stack"]):
-                                if item["id"] == link_id:
-                                    item["current"] = self.ctx["loop_counters"][link_id] + 1
-                                    break
-                            self._emit(
-                                ExecutionEvent.DEBUG, f"循环回跳: {self.ctx['loop_counters'][link_id]}/{target_count}"
-                            )
-                            self.ctx["index"] = start_index + 1
-
-                        # 已达目标次数 -> 循环结束，清理
-                        else:
-                            self._emit(ExecutionEvent.DEBUG, f"循环完成: {link_id}")
-                            del self.ctx["loop_counters"][link_id]
-                            if self.ctx["loop_stack"] and self.ctx["loop_stack"][-1]["id"] == link_id:
-                                self.ctx["loop_stack"].pop()
-                            self.ctx["index"] += 1
-
-                    # ── 条件判断开始 ──
-                    elif cmd_type in ["if_start", "if_color_start"]:
-                        if cmd_type == "if_start":
-                            condition_met = self.executor.exec_if_start(**params)
-                        else:
-                            condition_met = self.executor.exec_if_color_start(**params)
-
-                        if condition_met:  # 条件成立：顺序进入 if 体
-                            self.ctx["index"] += 1
-
-                        else:  # 条件不成立：尝试跳到 else 分支
-                            link_id = params.get("link_id")
-                            else_index = self._find_target_node(
-                                self.ctx["task_list"], self.ctx["index"], "else_branch", link_id
-                            )
-                            if else_index is not None:
-                                self._emit(ExecutionEvent.DEBUG, f"跳转到 Else 分支 (行 {else_index + 1})")
-                                self.ctx["index"] = else_index + 1
-
-                            else:  # 没有 else 分支则跳到 if_end
-                                end_type = "if_end" if cmd_type == "if_start" else "if_color_end"
-                                end_index = self._find_target_node(
-                                    self.ctx["task_list"], self.ctx["index"], end_type, link_id
-                                )
-                                if end_index is not None:
-                                    self._emit(ExecutionEvent.DEBUG, f"跳过 If 模块 (跳转至行 {end_index + 1})")
-                                    self.ctx["index"] = end_index + 1
-                                else:
-                                    self._emit(ExecutionEvent.ERROR, "结构错误：找不到 if_end")
-                                    self.ctx["index"] += 1
-
-                    # ── Else 分支标记（从 if 体执行完毕到达此处，应跳过 else 体）──
-                    elif cmd_type == "else_branch":
-                        link_id = params.get("link_id")
-                        end_index = self._find_target_node(self.ctx["task_list"], self.ctx["index"], "if_end", link_id)
-                        if end_index is None:
-                            end_index = self._find_target_node(self.ctx["task_list"], self.ctx["index"], "if_color_end", link_id)
-                        if end_index is not None:
-                            self.ctx["index"] = end_index + 1
-                        else:
-                            self._emit(ExecutionEvent.ERROR, "结构错误：Else 后找不到 if_end")
-                            self.ctx["index"] += 1
-
-                    # ── 锚点 ──
-                    elif cmd_type == "anchor":
-                        self.executor.exec_anchor(**params)
-                        self.ctx["index"] += 1
-
-                    # ── 跳转指令 ──
-                    elif cmd_type == "jump":
-                        target_raw = params.get("target_id", "")
-                        target = target_raw.split()[0] if target_raw else ""
-                        self.executor.exec_jump(target)
-                        found_idx = -1
-                        # 寻找目标锚点
-                        for i, step in enumerate(self.ctx["task_list"]):
-                            if step.get("type") == "anchor" and step.get("params", {}).get("anchor_id") == target:
-                                found_idx = i
-                                break
-                        if found_idx != -1:
-                            self._emit(ExecutionEvent.INFO, f"跳转成功，前往第 {found_idx + 1} 行")
-                            self.ctx["index"] = found_idx
-                            continue
-                        else:
-                            self._emit(ExecutionEvent.WARNING, f"跳转失败：未找到目标 '{target}'")
-                            self.ctx["index"] += 1
-
-                    # ── 跳出循环 (break) ──
-                    elif cmd_type == "break_loop":
-                        self.executor.exec_break()
-                        loop_end_index = self._find_enclosing_loop_end(self.ctx["task_list"], self.ctx["index"])
-                        if loop_end_index is not None:
-                            end_step_data = self.ctx["task_list"][loop_end_index]
-                            link_id = end_step_data.get("params", {}).get("link_id")
-                            if link_id in self.ctx["loop_counters"]:
-                                del self.ctx["loop_counters"][link_id]
-                            self._update_loop_stack_on_break(link_id)
-                            self._emit(ExecutionEvent.DEBUG, f"跳出循环 (跳转至行 {loop_end_index + 1})")
-                            self.ctx["index"] = loop_end_index + 1
-                        else:
-                            self._emit(ExecutionEvent.WARNING, "当前不在循环内，无法跳出")
-                            self.ctx["index"] += 1
-
-                    # ── 停止任务 ──
-                    elif cmd_type == "stop_task":
-                        self.executor.exec_stop_task()
-                        self.is_running = False
+                    # 分发执行任务指令
+                    handler = self._handlers.get(cmd_type, self._handle_normal_cmd)
+                    if not handler(cmd_type, params, step_desc):
                         break
-
-                    # ── 其余普通指令：查表执行 ──
-                    else:
-                        func = self.function_map.get(cmd_type)
-                        if func:
-                            try:
-                                func(**params)
-                                if not self.is_running:
-                                    break
-                            except Exception as e:
-                                self._emit(ExecutionEvent.ERROR, f"执行异常: {e}")
-                                self.is_running = False
-                                break
-                        else:
-                            self._emit(ExecutionEvent.WARNING, f"未知指令类型: {cmd_type}")
-                        self.ctx["index"] += 1
 
                 # 本轮结束后的收尾
                 if self.is_running:

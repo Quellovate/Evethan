@@ -916,7 +916,7 @@ class ExecuteWidget(QWidget):
         self.spin_timeout.setRange(0, 999999)
         self.spin_timeout.setValue(36000)
         self.spin_timeout.setFixedWidth(160)
-        self.spin_timeout.setToolTip("当前轮次执行超过该时间将强制中断并从头开始")
+        self.spin_timeout.setToolTip("当前轮次执行超过该时间将强制中断；若仍有剩余轮次，则进入下一轮并从头开始")
         self.spin_timeout.lineEdit().returnPressed.connect(self.spin_timeout.clearFocus)
         self.spin_timeout.installEventFilter(self)
         self.spin_timeout.valueChanged.connect(self.save_run_settings)
@@ -964,7 +964,7 @@ class ExecuteWidget(QWidget):
         log_layout = QVBoxLayout()
         log_layout.setSpacing(5)
 
-        # 摘要栏：当前步骤概况 + 操作按钮
+        # 摘要栏：当前指令概况 + 操作按钮
         self.brief_frame = QFrame()
         self.brief_frame.setStyleSheet(UIStyles.PANEL_BRIEF_FRAME)
         self.brief_frame.setFixedHeight(UIDims.BRIEF_FRAME_HEIGHT)
@@ -1174,6 +1174,8 @@ class ExecuteWidget(QWidget):
 
     def run_task(self):
         """开始执行所选任务（在子线程中运行调度器）"""
+        if self.scheduler.is_running:
+            return
         # 不再依赖 UI 组件的选中状态，直接读取记忆变量
         task_name = self.memory_task_name
         if not task_name:

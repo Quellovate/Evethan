@@ -343,7 +343,7 @@ class SettingsWidget(QWidget):
 
         lbl_log_hint = QLabel(
             "勾选后为【详细模式】：显示坐标计算、找图耗时、偏移过程等细节。\n"
-            "未勾选时为【简要模式】：仅显示任务状态、当前步骤和关键结果。"
+            "未勾选时为【简要模式】：仅显示任务状态、当前指令和关键结果。"
         )
         lbl_log_hint.setStyleSheet(UIStyles.LBL_SETTINGS_HINT)
 

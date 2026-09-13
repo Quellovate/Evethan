@@ -318,8 +318,8 @@ class UIFonts:
 # ═══════════════════════════════════════════════════════════
 class UIDims:
     # --- 行高 ---
-    ITEM_H_NORMAL = 50  # 普通步骤行高
-    ITEM_H_KEY = 60  # 按键步骤行高
+    ITEM_H_NORMAL = 50  # 普通指令行高
+    ITEM_H_KEY = 60  # 按键指令行高
     ITEM_H_SEPARATOR = 60  # 分隔符行高
     ITEM_H_STRUCTURE = 40  # 结构行（循环/分组头尾）行高
 

@@ -528,8 +528,6 @@ class WidgetFactory:
                 widget = AnchorComboBox()
             elif key == "key_code":
                 widget = KeyInputWidget()
-            elif key == "mode":
-                widget = ModeToggleWidget()
 
         if not widget:
             if data_type == int:

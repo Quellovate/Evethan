@@ -348,39 +348,28 @@ class TaskDelegate(QStyledItemDelegate):
 class ToolboxList(QListWidget):
     """左侧工具箱：按分类展示所有可用指令，支持拖拽"""
 
+    CATEGORY_ORDER = ["鼠标操作", "键盘操作", "流程控制", "结构模块"]
+
     def __init__(self, enable_drag=True):
         super().__init__()
         self.enable_drag = enable_drag
         self.setDragEnabled(enable_drag)
         self.setStyleSheet(UIStyles.LIST_WIDGET_BASE)
-        # 指令分类定义
-        self.categories = [
-            (
-                "鼠标操作",
-                [
-                    "mouse_move",
-                    "scroll",
-                    "camera_turn",
-                    "fixed_click",
-                    "offset_click",
-                    "image_click",
-                    "fixed_long_press",
-                    "offset_long_press",
-                    "image_long_press",
-                    "mouse_drag",
-                    "image_drag",
-                    "mouse_hold_start",
-                ],
-            ),
-            ("键盘操作", ["key_press", "key_long_press", "key_hold_start"]),
-            ("流程控制", ["wait", "find_image", "anchor", "jump", "break_loop", "stop_task"]),
-            ("结构模块", ["loop_start", "if_start", "if_color_start", "else_branch", "group_start", "separator"]),
-        ]
         self.populate_tools()
 
     def populate_tools(self):
         """根据分类和全局配置，填充工具箱列表项"""
+        self.clear()
         full_config = global_config.get_config()
+        cmds_by_category = {}
+        for cmd_type, config in full_config.items():
+            category = config.get("category")
+
+            # 无 category 的指令属于配对的 end 节点，跳过
+            if not category:
+                continue
+            cmds_by_category.setdefault(category, []).append((cmd_type, config))
+
         # 各分类对应的指令背景色
         bg_color_map = {
             "鼠标操作": UIColors.TOOLBOX_ITEM_MOUSE,
@@ -393,8 +382,19 @@ class ToolboxList(QListWidget):
             "键盘操作": (UIColors.TOOLBOX_HEADER_KEYBOARD_BG, UIColors.TOOLBOX_HEADER_KEYBOARD_TEXT),
             "流程控制": (UIColors.TOOLBOX_HEADER_CONTROL_BG, UIColors.TOOLBOX_HEADER_CONTROL_TEXT),
         }
-        for category_name, cmd_list in self.categories:
-            # 添加分类标题（不可点击/拖拽）
+        categories = []
+
+        for category in self.CATEGORY_ORDER:
+            if category in cmds_by_category:
+                categories.append(category)
+
+        for category in cmds_by_category:
+            if category not in categories:
+                categories.append(category)
+
+        # 添加分类标题
+        for category_name in categories:
+            commands = cmds_by_category[category_name]
             header_item = QListWidgetItem(category_name)
             if category_name in header_style_map:
                 bg_color, text_color = header_style_map[category_name]
@@ -407,15 +407,13 @@ class ToolboxList(QListWidget):
             header_item.setFlags(Qt.NoItemFlags)
             header_item.setSizeHint(QSize(0, UIDims.TOOLBOX_HEADER_H))
             self.addItem(header_item)
+
             # 添加该分类下的各条指令
-            for cmd_type in cmd_list:
-                if cmd_type not in full_config:
-                    continue
-                config = full_config[cmd_type]
-                label = DISPLAY_NAME_OVERRIDE.get(cmd_type, config["label"])
+            for cmd_type, config in commands:
+                label = DISPLAY_NAME_OVERRIDE.get(cmd_type, config.get("label", cmd_type))
                 item = QListWidgetItem(label)
                 item.setData(Qt.UserRole, cmd_type)
-                item.setToolTip(config["desc"])
+                item.setToolTip(config.get("desc", ""))
                 item.setSizeHint(QSize(0, UIDims.TOOLBOX_ITEM_H))
                 if category_name in bg_color_map:
                     item.setBackground(QBrush(bg_color_map[category_name]))
@@ -1258,7 +1256,10 @@ class ScriptTimeline(QListWidget):
         link_id = str(uuid.uuid4())[:8]
         start_data = self._create_single_data(cmd_type)
         start_data["params"]["link_id"] = link_id
-        end_type = cmd_type.replace("_start", "_end")
+        if cmd_type.startswith("if_"):
+            end_type = "if_end"
+        else:
+            end_type = cmd_type.replace("_start", "_end")
         end_traits = get_traits(end_type)
         if "end" in end_traits:
             end_data = self._create_single_data(end_type)
