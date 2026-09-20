@@ -37,6 +37,8 @@ DEFAULT_APP_SETTINGS = {
 # "flow"       : 流程控制
 # "separator"  : 分割线
 #
+# kind 结构类型: 仅用于结构解析和校验
+#
 # ui_bg 背景色:
 # "normal"     : 普通操作：白色
 # "loop"       : 循环：橙色
@@ -318,6 +320,7 @@ FACTORY_CONFIG = {
         "label": "🖱️ 鼠标按下 (开始)",
         "desc": "按下鼠标按键并保持，直到遇到结束节点",
         "traits": ["start"],
+        "kind": "mouse_hold",
         "ui_bg": "hold",
         "params": {"button": (str, "left"), "link_id": (str, ""), "wait_min": (int, 50), "wait_max": (int, 200)},
     },
@@ -325,6 +328,7 @@ FACTORY_CONFIG = {
         "label": "🖱️ 鼠标抬起 (结束)",
         "desc": "释放前面按住的鼠标按键",
         "traits": ["end"],
+        "kind": "mouse_hold",
         "ui_bg": "hold",
         "params": {"link_id": (str, "")},
     },
@@ -333,6 +337,7 @@ FACTORY_CONFIG = {
         "label": "⌨️ 键盘按下 (开始)",
         "desc": "按下键盘按键并保持，支持修饰键",
         "traits": ["start", "key_record"],
+        "kind": "key_hold",
         "ui_bg": "hold",
         "params": {"key_code": (str, "shift"), "link_id": (str, ""), "wait_min": (int, 50), "wait_max": (int, 200)},
     },
@@ -340,6 +345,7 @@ FACTORY_CONFIG = {
         "label": "⌨️ 键盘抬起 (结束)",
         "desc": "释放前面按住的键盘按键",
         "traits": ["end"],
+        "kind": "key_hold",
         "ui_bg": "hold",
         "params": {"link_id": (str, "")},
     },
@@ -406,6 +412,7 @@ FACTORY_CONFIG = {
         "label": "🔁 For 循环开始",
         "desc": "设定循环次数",
         "traits": ["start", "fold"],
+        "kind": "loop",
         "ui_bg": "loop",
         "params": {"count": (int, 5), "link_id": (str, ""), "collapsed": (bool, False)},  # link_id 用于配对循环结束
     },
@@ -413,6 +420,7 @@ FACTORY_CONFIG = {
         "label": "🔁 循环结束",
         "desc": "循环回跳点",
         "traits": ["end"],
+        "kind": "loop",
         "ui_bg": "loop",
         "params": {"link_id": (str, "")},
     },
@@ -421,6 +429,7 @@ FACTORY_CONFIG = {
         "label": "🔀 判断:若识图成功",
         "desc": "限时循环找图，成功则执行下方指令，失败则跳过或执行Else",
         "traits": ["start", "fold"],
+        "kind": "if",
         "ui_bg": "if",
         "params": {
             "image_path": (str, "cond.png"),
@@ -438,6 +447,7 @@ FACTORY_CONFIG = {
         "label": "🔀 判断:若找色成功",
         "desc": "限时循环找色，找到像素数达标则执行下方指令，否则执行Else",
         "traits": ["start", "fold"],
+        "kind": "if",
         "ui_bg": "if",
         "params": {
             "mode": (str, "basic"),
@@ -460,6 +470,7 @@ FACTORY_CONFIG = {
         "label": "🔀 判断结束",
         "desc": "逻辑分支结束点",
         "traits": ["end"],
+        "kind": "if",
         "ui_bg": "if",
         "params": {"link_id": (str, "")},
     },
@@ -468,6 +479,7 @@ FACTORY_CONFIG = {
         "label": "🔀 否则 (Else)",
         "desc": "当判断条件不满足时执行此处的指令",
         "traits": ["branch"],
+        "kind": "if",
         "ui_bg": "if",
         "params": {"link_id": (str, "")},
     },
@@ -477,6 +489,7 @@ FACTORY_CONFIG = {
         "label": "📂 任务分组",
         "desc": "折叠管理过长任务 (点击 + 号展开)",
         "traits": ["start", "fold"],
+        "kind": "group",
         "ui_bg": "group",
         "params": {"label": (str, "新分组"), "link_id": (str, ""), "collapsed": (bool, False)},
     },
@@ -484,6 +497,7 @@ FACTORY_CONFIG = {
         "label": "📂 分组结束",
         "desc": "分组结束点",
         "traits": ["end"],
+        "kind": "group",
         "ui_bg": "group",
         "params": {"link_id": (str, "")},
     },

@@ -12,7 +12,7 @@ import numpy as np
 import pyautogui
 import platform
 
-from definitions import KEY_NAME_ALIAS, SHIFT_CHAR_MAP
+from definitions import KEY_NAME_ALIAS, SHIFT_CHAR_MAP, FACTORY_CONFIG
 
 
 # ── Windows 光标坐标结构体 ──
@@ -522,3 +522,100 @@ class ColorUtils:
 
         tolerance = int(math.ceil(max(t_h, t_s, t_v)))
         return max(0, min(100, tolerance))
+
+
+class ScriptParser:
+    @staticmethod
+    def parse(task_list):
+        """解析指令结构：记录结构错误部分和流程控制指令跳转表"""
+        errors = {}
+        jump_table = {}
+        stack = []
+        anchor_map = {}
+
+        # 记录配对的结构与锚点
+        for i, step in enumerate(task_list):
+            t = step.get("type", "")
+            params = step.get("params", {})
+            link_id = params.get("link_id", "")
+
+            config = FACTORY_CONFIG.get(t, {})
+            traits = config.get("traits", [])
+            kind = config.get("kind", "")
+
+            # 锚点
+            if t == "anchor":
+                a_id = params.get("anchor_id")
+                if a_id:
+                    anchor_map.setdefault(a_id, i)
+
+            # 开始节点
+            if "start" in traits and link_id:
+                stack.append({"id": link_id, "row": i, "kind": kind, "breaks": [], "elses": []})
+                jump_table[i] = {}
+
+            # 结束节点
+            elif "end" in traits and link_id:
+                found_idx = -1
+                for j in range(len(stack) - 1, -1, -1):
+                    if stack[j]["id"] == link_id and stack[j]["kind"] == kind:
+                        found_idx = j
+                        break
+
+                if found_idx != -1:
+                    if found_idx != len(stack) - 1:
+                        errors[i] = "结构错误：存在交叉嵌套！"
+                        for k in range(found_idx + 1, len(stack)):
+                            errors[stack[k]["row"]] = "结构错误：存在交叉嵌套！"
+
+                    start_node = stack[found_idx]
+                    start_row = start_node["row"]
+
+                    # 写入跳转表
+                    if start_node["kind"] == "loop":
+                        jump_table[i] = {"start": start_row}
+                        for brk in start_node["breaks"]:
+                            jump_table[brk] = {"end": i}
+                    elif start_node["kind"] == "if":
+                        jump_table[start_row]["end"] = i
+                        for els in start_node["elses"]:
+                            jump_table[els] = {"end": i}
+                    elif start_node["kind"] == "group":
+                        jump_table[start_row]["end"] = i
+                        jump_table[i] = {"start": start_row}
+                    stack = stack[:found_idx]
+                else:
+                    errors[i] = "结构不完整：存在孤立的结束节点！"
+
+            # 分支节点
+            elif "branch" in traits:
+                if not stack or stack[-1]["kind"] != kind:
+                    errors[i] = "结构错误：分支必须放在对应的模块内部！"
+                else:
+                    start_node = stack[-1]
+                    start_row = start_node["row"]
+                    jump_table[start_row]["else"] = i
+                    start_node["elses"].append(i)
+
+            # 跳出循环
+            elif t == "break_loop":
+                loop_node = next((s for s in reversed(stack) if s["kind"] == "loop"), None)
+                if loop_node:
+                    loop_node["breaks"].append(i)
+                else:
+                    errors[i] = "结构错误：跳出循环必须放在循环内部！"
+
+        for s in stack:
+            errors[s["row"]] = "结构不完整：存在孤立的开始节点！"
+
+        # 记录跳转指令
+        for i, step in enumerate(task_list):
+            if step.get("type") == "jump":
+                target_raw = step.get("params", {}).get("target_id", "")
+                target_id = target_raw.split()[0] if target_raw else ""
+                if target_id in anchor_map:
+                    jump_table[i] = {"target": anchor_map[target_id]}
+                else:
+                    errors[i] = f"跳转失败：未找到目标锚点 '{target_id}'"
+
+        return errors, jump_table

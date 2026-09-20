@@ -619,7 +619,7 @@ class ScriptExecutor:
         self._emit(ExecutionEvent.DEBUG, "进入 Else 分支")
 
     def exec_if_end(self, link_id=None):
-        """If结构结束标记"""
+        """If结构结束"""
         pass
 
     # ==================== 流程控制 ====================
@@ -629,15 +629,15 @@ class ScriptExecutor:
         self._emit(ExecutionEvent.RESULT, "跳出循环")
 
     def exec_loop_start(self, count=1, link_id=None, current_loop_index=0, **kwargs):
-        """循环开始标记"""
+        """循环开始"""
         self._emit(ExecutionEvent.DEBUG, f"循环开始: 第 {current_loop_index + 1}/{count} 次")
 
     def exec_loop_end(self, link_id=None):
-        """循环结束标记"""
+        """循环结束"""
         pass
 
     def exec_anchor(self, anchor_id="", wait_min=50, wait_max=100):
-        """锚点标记"""
+        """锚点"""
         self._emit(ExecutionEvent.DEBUG, f"经过锚点: {anchor_id}")
         self._wait_after(wait_min, wait_max)
 
@@ -671,7 +671,7 @@ class ScriptExecutor:
         self._emit(ExecutionEvent.DEBUG, "离开分组")
 
     def exec_separator(self, label="—— 分割线 ——"):
-        """分割线标记，仅用于视觉分隔"""
+        """分割线，仅用于视觉分隔"""
         self._emit(ExecutionEvent.DEBUG, f"分割线: {label}")
 
     # ==================== 同步执行 (按下/抬起) ====================

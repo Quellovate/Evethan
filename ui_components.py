@@ -42,7 +42,7 @@ from config import global_config
 from definitions import PARAM_TRANSLATIONS, DISPLAY_NAME_OVERRIDE
 from tools import KeyRecorder, ScreenTool, ColorPickerTool
 from ui_styles import UIColors, UIDims, UIStyles, UIFonts
-from utils import ColorUtils
+from utils import ColorUtils, ScriptParser
 from ui_widgets import WidgetFactory, ButtonParamWidget, AnchorComboBox, RegionSelector, KeyInputWidget, HueRangeSlider
 
 
@@ -523,7 +523,6 @@ class ScriptTimeline(QListWidget):
 
         # 初始化历史管理器，并将回调传递给属性面板
         self.history_mgr = HistoryManager(self, max_history=50)
-        self.property_panel.set_history_callback(self.history_mgr.create_snapshot)
         self.property_panel.set_undo_redo_callbacks(self.history_mgr.undo, self.history_mgr.redo)
 
         # 拖拽指示器行号（-1 表示不显示）
@@ -542,6 +541,50 @@ class ScriptTimeline(QListWidget):
         self._scroll_speed = 0  # 当前滚动速度
         self._scroll_timer = QTimer(self)
         self._scroll_timer.timeout.connect(self._handle_auto_scroll)
+
+    # -------------------- 数据修改 --------------------
+    def apply_item_updates(self, item, param_updates=None, root_updates=None, snapshot_msg=None, target_row=None):
+        """统一的数据修改管道：取数据，记录快照，改数据"""
+        if not item:
+            return False
+
+        data = item.data(Qt.UserRole)
+        params = data.setdefault("params", {})
+        changed = False
+
+        if root_updates:
+            for k, v in root_updates.items():
+                if v is None:
+                    if k in data:
+                        changed = True
+                        break
+                elif data.get(k) != v:
+                    changed = True
+                    break
+
+        if not changed and param_updates:
+            for k, v in param_updates.items():
+                if params.get(k) != v:
+                    changed = True
+                    break
+        if not changed:
+            return False
+
+        if snapshot_msg:
+            self.history_mgr.create_snapshot(snapshot_msg, target_row=target_row)
+
+        if root_updates:
+            for k, v in root_updates.items():
+                if v is None:
+                    data.pop(k, None)
+                else:
+                    data[k] = v
+
+        if param_updates:
+            params.update(param_updates)
+
+        item.setData(Qt.UserRole, data)
+        return True
 
     # -------------------- 数据获取/辅助 --------------------
 
@@ -620,18 +663,18 @@ class ScriptTimeline(QListWidget):
             t = data.get("type", "")
             traits = get_traits(t)
             current_indent = depth
-            # 结束标记：先减深度
+            # 结束节点：先减深度
             if "end" in traits:
                 depth = max(0, depth - 1)
                 current_indent = depth
-            # 分支标记：当前行退一格，但不改变后续深度
+            # 分支节点：当前行退一格，但不改变后续深度
             elif "branch" in traits:
                 current_indent = max(0, depth - 1)
             # 仅在值变化时写入，减少不必要的 setData 调用
             if data.get("_cache_indent") != current_indent:
                 data["_cache_indent"] = current_indent
                 item.setData(Qt.UserRole, data)
-            # 开始标记：后增深度
+            # 开始节点：后增深度
             if "start" in traits:
                 depth += 1
 
@@ -763,7 +806,7 @@ class ScriptTimeline(QListWidget):
             self._insert_cmd_at(insert_row_idx - 1, cmd_type, data)
 
     def add_paired_module(self, row, cmd_type):
-        """插入成对的开始/结束标记（循环、分组、条件判断），共享 link_id"""
+        """插入成对的开始/结束节点（循环、分组、条件判断），共享 link_id"""
         paired_data = self._create_paired_data(cmd_type)
         for i, data in enumerate(paired_data):
             self._insert_cmd_at(row + i, data)
@@ -812,13 +855,15 @@ class ScriptTimeline(QListWidget):
         """录制完成后更新按键值"""
         row = self.row(item) + 1
         name = self._get_item_desc(item)
-        self.history_mgr.create_snapshot(f"修改第 {row} 行 [{name}] 的按键为 '{code_str}'", target_row=row - 1)
-        data = item.data(Qt.UserRole)
-        data["params"]["key_code"] = code_str
-        item.setData(Qt.UserRole, data)
+        self.apply_item_updates(
+            item,
+            param_updates={"key_code": code_str},
+            snapshot_msg=f"修改第 {row} 行 [{name}] 的按键为 '{code_str}'",
+            target_row=row - 1,
+        )
         self.refresh_ui()
         if self.currentItem() == item:
-            self.property_panel.load_properties(item, data)
+            self.property_panel.load_properties(item, item.data(Qt.UserRole))
 
     # -------------------- 鼠标事件处理 --------------------
 
@@ -1050,9 +1095,7 @@ class ScriptTimeline(QListWidget):
         module_name = config.get("label", "模块")
         action_name = f"折叠 [{module_name}]" if is_collapsed else f"展开 [{module_name}]"
 
-        self.history_mgr.create_snapshot(action_name)
-        data["params"]["collapsed"] = is_collapsed
-        item.setData(Qt.UserRole, data)
+        self.apply_item_updates(item, param_updates={"collapsed": is_collapsed}, snapshot_msg=action_name)
 
         self._apply_fold_states()
         self.setCurrentItem(item)
@@ -1272,8 +1315,7 @@ class ScriptTimeline(QListWidget):
 
     def _soft_validate_structure(self):
         """软校验：检查指令列表的结构合法性（嵌套是否正确、分组是否闭合等）"""
-        stack = []
-
+        
         # 清空所有历史错误标记
         for i in range(self.count()):
             item = self.item(i)
@@ -1282,58 +1324,39 @@ class ScriptTimeline(QListWidget):
                 del data["_error"]
                 item.setData(Qt.UserRole, data)
 
-        # 检查指令结构
+        # 解析指令结构
+        task_list = self.get_all_data()
+        errors, jump_table = ScriptParser.parse(task_list)
+
+        # 根据实际结构自动同步 Else 的 link_id
+        for start_row, targets in jump_table.items():
+            else_row = targets.get("else")
+            if else_row is None:
+                continue
+
+            start_item = self.item(start_row)
+            else_item = self.item(else_row)
+
+            start_data = start_item.data(Qt.UserRole)
+            paired_id = start_data.get("params", {}).get("link_id", "")
+
+            if paired_id:
+                self.apply_item_updates(else_item, param_updates={"link_id": paired_id})
+
+        # 将错误写回 UI
+        for row_idx, error_msg in errors.items():
+            if row_idx < self.count():
+                item = self.item(row_idx)
+                self._mark_error(item, error_msg)
+
+        # 检查子任务是否丢失
         for i in range(self.count()):
             item = self.item(i)
             data = item.data(Qt.UserRole)
-            t = data.get("type", "")
-            traits = get_traits(t)
-            ui_bg = get_ui_bg(t)
-            link_id = data.get("params", {}).get("link_id", "")
-
-            # 检查子任务是否丢失
-            if t == "call_subtask":
+            if data.get("type") == "call_subtask":
                 task_id = data.get("params", {}).get("task_id")
                 if self.task_manager and task_id not in self.task_manager.task_id_map:
                     self._mark_error(item, "未找到所指定的任务，可能已被删除！")
-                continue
-
-            # 处理开始标记
-            if "start" in traits and link_id:
-                stack.append({"type": t, "id": link_id, "row": i, "item": item, "ui_bg": ui_bg})
-
-            # 处理结束标记
-            elif "end" in traits and link_id:
-                # 寻找匹配的开始标记
-                found_idx = -1
-                for j in range(len(stack) - 1, -1, -1):
-                    if stack[j]["id"] == link_id:
-                        found_idx = j
-                        break
-
-                if found_idx != -1:
-                    if found_idx != len(stack) - 1:
-                        self._mark_error(item, "结构错误：存在交叉嵌套！")
-                        for k in range(found_idx + 1, len(stack)):
-                            self._mark_error(stack[k]["item"], "结构错误：存在交叉嵌套！")
-                    stack = stack[:found_idx]
-                else:
-                    self._mark_error(item, "结构不完整：存在孤立的结束标记！")
-
-                # 处理分支标记
-            elif "branch" in traits:
-                if not stack or stack[-1]["ui_bg"] != ui_bg:
-                    config = get_cmd_config(t)
-                    label = config.get("label", "分支")
-                    self._mark_error(item, f"结构错误：[{label}] 必须放在对应的模块内部！")
-                elif stack[-1]["id"] != link_id:
-                    data["params"]["link_id"] = stack[-1]["id"]
-                    item.setData(Qt.UserRole, data)
-
-        for s in stack:
-            data = s["item"].data(Qt.UserRole)
-            if "_error" not in data:
-                self._mark_error(s["item"], "结构不完整：存在孤立的开始标记！")
 
     def _mark_error(self, item, error_msg):
         """写入错误信息"""
@@ -1545,7 +1568,6 @@ class PropertyEditor(QWidget):
         main_layout.addWidget(self.scroll_area)
 
         self.active_widgets = {}  # 参数名 → 控件 的映射
-        self.history_callback = None  # 历史记录创建回调
         self.undo_callback = None
         self.redo_callback = None
 
@@ -1558,9 +1580,6 @@ class PropertyEditor(QWidget):
         self.shortcut_redo_y.activated.connect(self._trigger_redo)
 
     # -------------------- 回调设置 --------------------
-
-    def set_history_callback(self, callback):
-        self.history_callback = callback
 
     def set_undo_redo_callbacks(self, undo_cb, redo_cb):
         self.undo_callback = undo_cb
@@ -1858,19 +1877,24 @@ class PropertyEditor(QWidget):
 
     def on_region_selected(self, rect_list):
         """区域框选完成回调"""
-        if self.history_callback:
-            self.history_callback(f"修改第 {self._get_current_row_idx()} 行: 设置识别区域 {rect_list}")
-        self.current_data["params"]["region"] = rect_list
-        self.current_item.setData(Qt.UserRole, self.current_data)
+        self.current_item.listWidget().apply_item_updates(
+            self.current_item,
+            param_updates={"region": rect_list},
+            snapshot_msg=f"修改第 {self._get_current_row_idx()} 行: 设置识别区域 {rect_list}",
+        )
+        self.current_data = self.current_item.data(Qt.UserRole)
+
         self.data_changed.emit()
         self.load_properties(self.current_item, self.current_data, self.task_root_path)
 
     def reset_region_to_fullscreen(self):
         """重置识别区域为全屏"""
-        if self.history_callback:
-            self.history_callback(f"修改第 {self._get_current_row_idx()} 行: 重置识别区域为全屏")
-        self.current_data["params"]["region"] = [0, 0, 0, 0]
-        self.current_item.setData(Qt.UserRole, self.current_data)
+        self.current_item.listWidget().apply_item_updates(
+            self.current_item,
+            param_updates={"region": [0, 0, 0, 0]},
+            snapshot_msg=f"修改第 {self._get_current_row_idx()} 行: 重置识别区域为全屏",
+        )
+        self.current_data = self.current_item.data(Qt.UserRole)
         self.data_changed.emit()
         self.load_properties(self.current_item, self.current_data, self.task_root_path)
 
@@ -1895,13 +1919,18 @@ class PropertyEditor(QWidget):
             screen_geo = QApplication.primaryScreen().geometry()
             env_w = screen_geo.width()
             env_h = screen_geo.height()
-            self.current_data["params"]["env_w"] = env_w
-            self.current_data["params"]["env_h"] = env_h
+            param_updates = {"env_w": env_w, "env_h": env_h, "image_path": filename}
             if self.current_item:
-                self.current_item.setData(Qt.UserRole, self.current_data)
+                self.current_item.listWidget().apply_item_updates(
+                    self.current_item,
+                    param_updates=param_updates,
+                    snapshot_msg=f"修改第 {self._get_current_row_idx()} 行: 更新截图图片",
+                )
+                self.current_data = self.current_item.data(Qt.UserRole)
+
             if "image_path" in self.active_widgets:
                 self.active_widgets["image_path"].set_value(filename)
-                self.update_param_from_widget("image_path")
+
             self.data_changed.emit()
         except Exception as e:
             QMessageBox.critical(self, "保存失败", str(e))
@@ -1951,27 +1980,20 @@ class PropertyEditor(QWidget):
         hex_code = stats["hex_code"]
         h_start, s_min, v_min = stats["hsv_min"]
         h_end, s_max, v_max = stats["hsv_max"]
-
         mode = self.current_data["params"].get("mode", "basic")
 
-        if self.history_callback:
-            self.history_callback(f"修改第 {self._get_current_row_idx()} 行: 快捷取色 {hex_code}")
+        param_updates = {"center_hex": hex_code}
 
         if mode == "basic":
             # 基础模式：反推容差
             tolerance = ColorUtils.calc_tolerance_from_ranges(hex_code, h_start, h_end, s_min, s_max, v_min, v_max)
             self.active_widgets["center_hex"].set_value(hex_code)
             self.active_widgets["tolerance"].set_value(tolerance)
-            self.current_data["params"]["center_hex"] = hex_code
-            self.current_data["params"]["tolerance"] = tolerance
-            if self.current_item:
-                self.current_item.setData(Qt.UserRole, self.current_data)
-            self._refresh_hsv_ui()
+            param_updates["tolerance"] = tolerance
 
         else:
             # 高级模式：直接应用提取的 HSV
             self.active_widgets["center_hex"].set_value(hex_code)
-            self.current_data["params"]["center_hex"] = hex_code
 
             raw_vals = {
                 "h_start": h_start,
@@ -1981,17 +2003,24 @@ class PropertyEditor(QWidget):
                 "v_min": int(v_min),
                 "v_max": int(v_max),
             }
-
             for k, v in raw_vals.items():
                 if k in self.active_widgets:
                     self.active_widgets[k].set_value(v)
-                self.current_data["params"][k] = v
+                param_updates[k] = v
 
             if "_hue_slider" in self.active_widgets:
                 self.active_widgets["_hue_slider"].set_value((h_start, h_end))
 
-            if self.current_item:
-                self.current_item.setData(Qt.UserRole, self.current_data)
+        if self.current_item:
+            self.current_item.listWidget().apply_item_updates(
+                self.current_item,
+                param_updates=param_updates,
+                snapshot_msg=f"修改第 {self._get_current_row_idx()} 行: 快捷取色 {hex_code}",
+            )
+            self.current_data = self.current_item.data(Qt.UserRole)
+
+        if mode == "basic":
+            self._refresh_hsv_ui()
 
         self.data_changed.emit()
 
@@ -2044,16 +2073,18 @@ class PropertyEditor(QWidget):
                 if "_desc_input" in self.active_widgets:
                     self.active_widgets["_desc_input"].clearFocus()
                 return
-            if self.history_callback:
-                self.history_callback(f"修改第 {self._get_current_row_idx()} 行指令的备注")
-            self.current_data["desc"] = text
-            # 分组/分割线备注同步更新 label
-            if "label" in self.current_data["params"]:
-                self.current_data["params"]["label"] = text
-            self.current_item.setData(Qt.UserRole, self.current_data)
-            if self.current_item.listWidget():
-                self.current_item.listWidget().refresh_line_numbers()
+            param_upd = {"label": text} if "label" in self.current_data["params"] else None
+            self.current_item.listWidget().apply_item_updates(
+                self.current_item,
+                root_updates={"desc": text},
+                param_updates=param_upd,
+                snapshot_msg=f"修改第 {self._get_current_row_idx()} 行指令的备注",
+            )
+
+            self.current_data = self.current_item.data(Qt.UserRole)
+            self.current_item.listWidget().refresh_line_numbers()
             self.data_changed.emit()
+
             if "_desc_input" in self.active_widgets:
                 self.active_widgets["_desc_input"].clearFocus()
 
@@ -2072,13 +2103,7 @@ class PropertyEditor(QWidget):
             return
 
         if new_val is not None and self.current_data["params"].get(key) != new_val:
-            if self.history_callback:
-                row_idx = self._get_current_row_idx()
-                target_row_0based = (row_idx - 1) if isinstance(row_idx, int) else None
-                self.history_callback(
-                    f"修改第 {self._get_current_row_idx()} 行: {PARAM_TRANSLATIONS.get(key, key)} -> {new_val}",
-                    target_row=target_row_0based,
-                )
+            param_updates = {key: new_val}
 
             if key == "mode":
                 old_mode = self.current_data["params"].get("mode", "basic")
@@ -2096,13 +2121,17 @@ class PropertyEditor(QWidget):
 
                     # 更新底层数据
                     self.active_widgets["tolerance"].set_value(new_tol)
-                    self.current_data["params"]["tolerance"] = new_tol
+                    param_updates["tolerance"] = new_tol
 
-            self.current_data["params"][key] = new_val
-            self.current_item.setData(Qt.UserRole, self.current_data)
+            row_idx = self._get_current_row_idx()
+            self.current_item.listWidget().apply_item_updates(
+                self.current_item,
+                param_updates=param_updates,
+                snapshot_msg=f"修改第 {row_idx} 行: {PARAM_TRANSLATIONS.get(key, key)} -> {new_val}",
+                target_row=(row_idx - 1) if isinstance(row_idx, int) else None,
+            )
 
-            if self.current_item.listWidget():
-                self.current_item.listWidget().viewport().update()
+            self.current_data = self.current_item.data(Qt.UserRole)
             self.data_changed.emit()
 
             if key in ["tolerance", "center_hex"] or (key == "mode" and new_val == "basic"):
@@ -2290,13 +2319,9 @@ class BatchEditWidget(QWidget):
 
         # 写入每个目标项
         for item in self.target_items:
-            data = item.data(Qt.UserRole)
-            if new_desc is not None:
-                data["desc"] = new_desc
-            for k, v in new_params.items():
-                if k in data["params"]:
-                    data["params"][k] = v
-            item.setData(Qt.UserRole, data)
+            root_upd = {"desc": new_desc} if new_desc is not None else None
+            valid_param_upd = {k: v for k, v in new_params.items() if k in item.data(Qt.UserRole).get("params", {})}
+            self.timeline.apply_item_updates(item, param_updates=valid_param_upd, root_updates=root_upd)
 
         self.timeline.refresh_line_numbers()
         self.data_changed.emit()

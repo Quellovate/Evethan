@@ -4,6 +4,7 @@
 import time
 import os
 from executor import ScriptExecutor, ExecutionEvent
+from utils import ScriptParser
 
 
 class TaskScheduler:
@@ -84,45 +85,6 @@ class TaskScheduler:
             self.ctx["loop_stack"] = [x for x in self.ctx["loop_stack"] if x["id"] != link_id]
 
     # ──────────────────────────────────────────────
-    #  指令索引查找（用于控制流跳转）
-    # ──────────────────────────────────────────────
-
-    def _find_loop_start_index(self, task_list, link_id):
-        """根据 link_id 查找对应的 loop_start 指令索引"""
-        for i, step in enumerate(task_list):
-            if step.get("type") == "loop_start" and step.get("params", {}).get("link_id") == link_id:
-                return i
-        return None
-
-    def _find_target_node(self, task_list, start_index, target_type, link_id):
-        """从 start_index 之后查找指定类型和 link_id 的指令索引（用于 if/else/if_end 跳转）"""
-        for i in range(start_index + 1, len(task_list)):
-            step = task_list[i]
-            if step.get("type") == target_type and step.get("params", {}).get("link_id") == link_id:
-                return i
-            # 查找 else_branch 时若先遇到 if_end，说明没有 else 分支
-            if (
-                target_type == "else_branch"
-                and step.get("type") == "if_end"
-                and step.get("params", {}).get("link_id") == link_id
-            ):
-                return None
-        return None
-
-    def _find_enclosing_loop_end(self, task_list, current_index):
-        """从当前位置向后查找最近一层包裹的 loop_end（考虑嵌套深度）"""
-        depth = 0
-        for i in range(current_index + 1, len(task_list)):
-            t_type = task_list[i].get("type")
-            if t_type == "loop_start":
-                depth += 1
-            elif t_type == "loop_end":
-                if depth == 0:
-                    return i
-                depth -= 1
-        return None
-
-    # ──────────────────────────────────────────────
     #  控制流处理方法
     # ──────────────────────────────────────────────
 
@@ -156,6 +118,13 @@ class TaskScheduler:
 
         sub_script = self.task_manager.load_script(actual_name)
         sub_dir = self.task_manager.get_task_path(actual_name)
+        sub_errors, sub_jump_table = ScriptParser.parse(sub_script)
+
+        if sub_errors:
+            self._emit(
+                ExecutionEvent.WARNING,
+                f"警告：子任务 [{actual_name}] 存在 {len(sub_errors)} 处结构错误，可能会导致运行异常！",
+            )
         self._emit(ExecutionEvent.INFO, f"进入子任务: {actual_name}")
 
         # 上下文先移动到下一条指令，再压栈
@@ -168,6 +137,7 @@ class TaskScheduler:
             "index": 0,
             "loop_counters": {},
             "loop_stack": [],
+            "jump_table": sub_jump_table,
         }
         return True
 
@@ -191,7 +161,7 @@ class TaskScheduler:
     def _handle_loop_end(self, cmd_type, params, step_desc):
         """循环结束：决定回跳或离开循环"""
         link_id = params.get("link_id")
-        start_index = self._find_loop_start_index(self.ctx["task_list"], link_id)
+        start_index = self.ctx["jump_table"].get(self.ctx["index"], {}).get("start")
         if start_index is None:
             self.ctx["index"] += 1
             return True
@@ -233,28 +203,25 @@ class TaskScheduler:
 
         if condition_met:  # 条件成立：顺序进入 if 体
             self.ctx["index"] += 1
-        else:  # 条件不成立：尝试跳到 else 分支
-            link_id = params.get("link_id")
-            else_index = self._find_target_node(self.ctx["task_list"], self.ctx["index"], "else_branch", link_id)
-            if else_index is not None:
-                self._emit(ExecutionEvent.DEBUG, f"跳转到 Else 分支 (行 {else_index + 1})")
-                self.ctx["index"] = else_index + 1
-            else:  # 没有 else 分支跳过整个 If 模块
-                end_index = self._find_target_node(self.ctx["task_list"], self.ctx["index"], "if_end", link_id)
-                if end_index is not None:
-                    self._emit(ExecutionEvent.DEBUG, f"跳过 If 模块 (跳转至行 {end_index + 1})")
-                    self.ctx["index"] = end_index + 1
+        else:  # 跳转到 Else 或 End
+            targets = self.ctx["jump_table"].get(self.ctx["index"], {})
+            target_index = targets.get("else", targets.get("end"))
+            if target_index is not None:
+                if targets.get("else") is not None:
+                    self._emit(ExecutionEvent.DEBUG, f"条件不成立，跳转到 Else 分支 (行 {target_index + 1})")
                 else:
-                    self._emit(ExecutionEvent.ERROR, "结构错误：找不到 if_end")
-                    self.ctx["index"] += 1
+                    self._emit(ExecutionEvent.DEBUG, f"条件不成立，跳过 If 模块 (行 {target_index + 1})")
+                self.ctx["index"] = target_index + 1
+            else:
+                self._emit(ExecutionEvent.ERROR, "结构错误：找不到 if_end")
+                self.ctx["index"] += 1
         return True
 
     def _handle_else_branch(self, cmd_type, params, step_desc):
         """Else 分支：若能顺序执行到 Else 节点，说明 If 条件成立，直接跳过 Else 分支"""
-        link_id = params.get("link_id")
-        end_index = self._find_target_node(self.ctx["task_list"], self.ctx["index"], "if_end", link_id)
-        if end_index is not None:
-            self.ctx["index"] = end_index + 1
+        target_end = self.ctx["jump_table"].get(self.ctx["index"], {}).get("end")
+        if target_end is not None:
+            self.ctx["index"] = target_end + 1
         else:
             self._emit(ExecutionEvent.ERROR, "结构错误：Else 后找不到 if_end")
             self.ctx["index"] += 1
@@ -272,16 +239,11 @@ class TaskScheduler:
         target = target_raw.split()[0] if target_raw else ""
         self.executor.exec_jump(target)
 
-        # 在当前任务上下文中寻找目标锚点
-        found_idx = -1
-        for i, step in enumerate(self.ctx["task_list"]):
-            if step.get("type") == "anchor" and step.get("params", {}).get("anchor_id") == target:
-                found_idx = i
-                break
-
-        if found_idx != -1:
-            self._emit(ExecutionEvent.INFO, f"跳转成功，前往第 {found_idx + 1} 行")
-            self.ctx["index"] = found_idx
+        # 查表找目标锚点
+        target_index = self.ctx["jump_table"].get(self.ctx["index"], {}).get("target")
+        if target_index is not None:
+            self._emit(ExecutionEvent.INFO, f"跳转成功，前往第 {target_index + 1} 行")
+            self.ctx["index"] = target_index
         else:
             self._emit(ExecutionEvent.WARNING, f"跳转失败：未找到目标 '{target}'")
             self.ctx["index"] += 1
@@ -290,15 +252,16 @@ class TaskScheduler:
     def _handle_break_loop(self, cmd_type, params, step_desc):
         """跳出循环：只跳出最内层"""
         self.executor.exec_break()
-        loop_end_index = self._find_enclosing_loop_end(self.ctx["task_list"], self.ctx["index"])
-        if loop_end_index is not None:
-            end_step_data = self.ctx["task_list"][loop_end_index]
+        # 查表找外层 loop_end
+        target_end = self.ctx["jump_table"].get(self.ctx["index"], {}).get("end")
+        if target_end is not None:
+            end_step_data = self.ctx["task_list"][target_end]
             link_id = end_step_data.get("params", {}).get("link_id")
             if link_id in self.ctx["loop_counters"]:
                 del self.ctx["loop_counters"][link_id]
             self._update_loop_stack_on_break(link_id)
-            self._emit(ExecutionEvent.DEBUG, f"跳出循环 (跳转至行 {loop_end_index + 1})")
-            self.ctx["index"] = loop_end_index + 1
+            self._emit(ExecutionEvent.DEBUG, f"跳出循环 (跳转至行 {target_end + 1})")
+            self.ctx["index"] = target_end + 1
         else:
             self._emit(ExecutionEvent.WARNING, "当前不在循环内，无法跳出")
             self.ctx["index"] += 1
@@ -366,6 +329,9 @@ class TaskScheduler:
         current_round = 0
 
         try:
+            errors, jump_table = ScriptParser.parse(task_list)
+            if errors:
+                self._emit(ExecutionEvent.WARNING, f"警告：脚本存在 {len(errors)} 处结构错误，可能会导致运行异常！")
             # ── 外层：多轮循环 ──
             while self.is_running and current_round < run_times:
                 current_round += 1
@@ -382,6 +348,7 @@ class TaskScheduler:
                     "index": 0,
                     "loop_counters": {},
                     "loop_stack": [],
+                    "jump_table": jump_table,
                 }
 
                 # ── 内层：逐步执行 ──
